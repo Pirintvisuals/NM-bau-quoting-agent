@@ -8,7 +8,17 @@
   let sending = false;
   let conversationHistory = []; // Track conversation history
 
+  let container = null;
+
+  function createContainer() {
+    container = document.createElement("div");
+    container.id = "faq-agent-container";
+    document.body.appendChild(container);
+  }
+
   function createLauncher() {
+    if (!container) createContainer();
+
     const btn = document.createElement("div");
     btn.className = "faq-chat-launcher";
 
@@ -19,7 +29,7 @@
 
     btn.appendChild(img);
     btn.onclick = toggleChat;
-    document.body.appendChild(btn);
+    container.appendChild(btn);
 
     // Create floating tooltip
     console.log("Creating tooltip...");
@@ -43,7 +53,7 @@
       toggleChat();
     };
 
-    document.body.appendChild(tooltip);
+    container.appendChild(tooltip);
 
     // Show tooltip after 1.5 seconds for quick engagement
     setTimeout(() => {
@@ -111,7 +121,7 @@
     chatWindow.appendChild(messagesContainer);
     chatWindow.appendChild(inputBar);
 
-    document.body.appendChild(chatWindow);
+    container.appendChild(chatWindow);
 
     addMessage(
       "bot",
