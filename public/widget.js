@@ -1,25 +1,68 @@
 (function () {
-  const FUNCTION_URL = "https://helpful-toffee-fd42c2.netlify.app/.netlify/functions/faq-agent";
+  const FUNCTION_URL = "/api/faq-agent";
 
   let chatOpen = false;
   let chatWindow = null;
   let messagesContainer = null;
   let inputElement = null;
   let sending = false;
+  let conversationHistory = []; // Track conversation history
 
   function createLauncher() {
     const btn = document.createElement("div");
     btn.className = "faq-chat-launcher";
-    btn.textContent = "Ask a question";
+
+    const img = document.createElement("img");
+    img.src = "logo.png"; // Updated to user's new logo
+    img.alt = "Chat with Landscale";
+    img.className = "faq-chat-launcher-icon";
+
+    btn.appendChild(img);
     btn.onclick = toggleChat;
     document.body.appendChild(btn);
+
+    // Create floating tooltip
+    console.log("Creating tooltip...");
+    const tooltip = document.createElement("div");
+    tooltip.className = "faq-chat-tooltip";
+    // Compelling engagement question
+    tooltip.innerHTML = "Hi there! 👋<br>Planning a garden project?";
+
+    // Close button for tooltip
+    const closeBtn = document.createElement("span");
+    closeBtn.className = "faq-tooltip-close";
+    closeBtn.innerHTML = "×";
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      tooltip.classList.add("hidden");
+    };
+
+    tooltip.appendChild(closeBtn);
+    tooltip.onclick = () => {
+      tooltip.classList.add("hidden");
+      toggleChat();
+    };
+
+    document.body.appendChild(tooltip);
+
+    // Show tooltip after 1.5 seconds for quick engagement
+    setTimeout(() => {
+      tooltip.classList.add("show");
+    }, 1500);
   }
 
   function toggleChat() {
+    const tooltip = document.querySelector(".faq-chat-tooltip");
+
     if (chatOpen) {
       chatWindow.remove();
       chatOpen = false;
     } else {
+      if (tooltip) {
+        // Just hide it, don't remove so we can show it again next session if needed
+        tooltip.classList.remove("show");
+        setTimeout(() => tooltip.classList.add("hidden"), 300);
+      }
       openChat();
       chatOpen = true;
     }
@@ -31,7 +74,15 @@
 
     const header = document.createElement("div");
     header.className = "faq-chat-header";
-    header.textContent = "Landscaping FAQ assistant";
+
+    const logo = document.createElement("img");
+    logo.src = "logo.png"; // Updated logo
+    logo.alt = "Landscale";
+    header.appendChild(logo);
+
+    const headerText = document.createElement("span");
+    headerText.textContent = "Landscale AI"; // Updated Name
+    header.appendChild(headerText);
 
     messagesContainer = document.createElement("div");
     messagesContainer.className = "faq-chat-messages";
@@ -41,7 +92,7 @@
 
     inputElement = document.createElement("input");
     inputElement.type = "text";
-    inputElement.placeholder = "Ask a question about our services";
+    inputElement.placeholder = "Ask about landscaping, patios, or design..."; // More specific placeholder
 
     const sendBtn = document.createElement("button");
     sendBtn.textContent = "Send";
@@ -64,14 +115,27 @@
 
     addMessage(
       "bot",
-      "Hi. I can answer questions about our landscaping and garden services. How can I help you."
+      "Hello! I'm Milán's digital assistant. How can I help you regarding your garden project today?"
     );
   }
 
   function addMessage(sender, text) {
     const msg = document.createElement("div");
     msg.className = "faq-chat-message " + sender;
-    msg.textContent = sender + ": " + text;
+
+    const label = document.createElement("div");
+    label.className = "message-label";
+    label.textContent = sender === "bot" ? "Gardening Agent" : "You";
+
+    const bubble = document.createElement("div");
+    bubble.className = "message-bubble";
+    if (text === "Thinking...") {
+      bubble.className += " thinking";
+    }
+    bubble.textContent = text;
+
+    msg.appendChild(label);
+    msg.appendChild(bubble);
     messagesContainer.appendChild(msg);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
@@ -85,13 +149,22 @@
     inputElement.value = "";
     sending = true;
 
+    // Add user message to conversation history
+    conversationHistory.push({
+      role: "user",
+      parts: [{ text: text }]
+    });
+
     addMessage("bot", "Thinking...");
 
     try {
       const res = await fetch(FUNCTION_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({
+          question: text,
+          history: conversationHistory // Send conversation history
+        }),
       });
 
       const botMessages = messagesContainer.querySelectorAll(".faq-chat-message.bot");
@@ -107,7 +180,14 @@
       }
 
       const data = await res.json();
-      addMessage("bot", data.answer || "Sorry, I could not find an answer.");
+      const botResponse = data.answer || "Sorry, I could not find an answer.";
+      addMessage("bot", botResponse);
+
+      // Add bot response to conversation history
+      conversationHistory.push({
+        role: "model",
+        parts: [{ text: botResponse }]
+      });
     } catch (err) {
       console.error(err);
       addMessage("bot", "Sorry, there was a problem connecting to the server.");
