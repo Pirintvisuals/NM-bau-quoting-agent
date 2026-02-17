@@ -1,5 +1,8 @@
 (function () {
-  const FUNCTION_URL = "/api/faq-agent";
+  // Configuration with defaults for local development
+  const config = window.LANDSCALE_CONFIG || {};
+  const apiUrl = config.apiUrl || "/api/faq-agent";
+  const assetsUrl = config.assetsUrl || ""; // e.g. "https://your-app.vercel.app"
 
   let chatOpen = false;
   let chatWindow = null;
@@ -23,7 +26,7 @@
     btn.className = "faq-chat-launcher";
 
     const img = document.createElement("img");
-    img.src = "logo.png"; // Updated to user's new logo
+    img.src = assetsUrl ? `${assetsUrl}/logo.png` : "logo.png"; // Updated to user's new logo
     img.alt = "Chat with Landscale";
     img.className = "faq-chat-launcher-icon";
 
@@ -94,7 +97,7 @@
     header.className = "faq-chat-header";
 
     const logo = document.createElement("img");
-    logo.src = "logo.png"; // Updated logo
+    logo.src = assetsUrl ? `${assetsUrl}/logo.png` : "logo.png"; // Updated logo
     logo.alt = "Landscale";
     header.appendChild(logo);
 
@@ -176,7 +179,7 @@
     addMessage("bot", "Thinking...");
 
     try {
-      const res = await fetch(FUNCTION_URL, {
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
