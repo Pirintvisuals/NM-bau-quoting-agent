@@ -45,11 +45,13 @@
     closeBtn.onclick = (e) => {
       e.stopPropagation();
       tooltip.classList.add("hidden");
+      window.parent.postMessage('hideTooltip', '*');
     };
 
     tooltip.appendChild(closeBtn);
     tooltip.onclick = () => {
       tooltip.classList.add("hidden");
+      window.parent.postMessage('hideTooltip', '*');
       toggleChat();
     };
 
@@ -58,6 +60,7 @@
     // Show tooltip after 1.5 seconds for quick engagement
     setTimeout(() => {
       tooltip.classList.add("show");
+      window.parent.postMessage('showTooltip', '*');
     }, 1500);
   }
 
@@ -67,14 +70,19 @@
     if (chatOpen) {
       chatWindow.remove();
       chatOpen = false;
+      // Notify parent to close
+      window.parent.postMessage('closeChat', '*');
     } else {
       if (tooltip) {
         // Just hide it, don't remove so we can show it again next session if needed
         tooltip.classList.remove("show");
+        window.parent.postMessage('hideTooltip', '*');
         setTimeout(() => tooltip.classList.add("hidden"), 300);
       }
       openChat();
       chatOpen = true;
+      // Notify parent to open
+      window.parent.postMessage('openChat', '*');
     }
   }
 
