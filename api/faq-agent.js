@@ -381,7 +381,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
 
     const html = `
     <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#111827">
-      <div style="background:#111827;color:#FBBF24;padding:20px 24px;border-radius:12px 12px 0 0">
+      <div style="background:#0369A1;color:#ffffff;padding:20px 24px;border-radius:12px 12px 0 0">
         <h2 style="margin:0">${heading}</h2>
       </div>
       <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
