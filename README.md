@@ -55,11 +55,17 @@ the `PRICES` object at the top of [`api/faq-agent.js`](api/faq-agent.js).
 - **VAT:** none applied — prices displayed exactly as on the sheet.
 
 ### Extra questions added (beyond the sheet)
-These improve lead quality / sizing but **do not** change the price:
-1. **Replacement vs. new install** — also drives the demolition line (above).
-2. **Hot‑water need** (bathrooms / occupants) — lets the bot sanity‑check combi
-   vs. storage boiler when the customer is unsure.
-3. **Urgency / timeframe** — strong lead signal for the owner.
+These improve lead quality but **do not** change the price:
+1. **Replacement vs. new install** — also gates the current‑boiler question.
+2. **Urgency / timeframe** — strong lead signal for the owner.
+
+### Quote delivery
+- The itemised estimate is **shown in the chat** as soon as all answers are in.
+- The **owner always** receives it by e‑mail (with the client's details).
+- The **customer is offered a button** to have the quote e‑mailed to *them* too.
+- Completion is decided by the **backend** (`isQuoteReady`) from a running hidden
+  state block the model maintains — so the quote always appears even if the model
+  phrasing varies. The model never computes the price.
 
 ### ⚠️ Confirm with the company before go‑live
 Whether the boiler‑type prices (450 000 / 900 000) **include the appliance** or

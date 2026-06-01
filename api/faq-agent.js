@@ -82,6 +82,21 @@ function buildQuote(sel) {
     return { items, total, isReplacement };
 }
 
+// Backend decides when the quote is complete — independent of the AI model.
+function isQuoteReady(s) {
+    if (!s || typeof s !== "object") return false;
+    const filled = (k) => s[k] != null && String(s[k]).trim() !== "";
+    const required = [
+        "install_type", "new_boiler", "flue", "rcd",
+        "wet_system", "commissioning", "demolition",
+        "urgency", "name", "email", "phone", "postal_code", "budget",
+    ];
+    if (!required.every(filled)) return false;
+    // current_boiler is only required on a replacement
+    if (String(s.install_type).toLowerCase() === "csere" && !filled("current_boiler")) return false;
+    return true;
+}
+
 // Customer-facing Hungarian estimate text (numbers come from buildQuote).
 function renderCustomerQuote(quote, sel) {
     const lines = quote.items.map(i => `• ${i.label}: ${formatHuf(i.huf)}`).join("\n");
@@ -100,6 +115,8 @@ function renderCustomerQuote(quote, sel) {
         `ℹ️ Gázkazán cseréjéhez/kiépítéséhez jellemzően gázterv és a szolgáltatói üzembe helyezés is szükséges — ezt a helyszíni felmérés után, külön tételként adjuk meg.`,
         ``,
         `Ez egy előzetes, tájékoztató jellegű kalkuláció. Az adataidat továbbítottuk a Kazán Kecskeméthez, hamarosan keresünk a pontosításért. 📞 +36 30 260 57 56`,
+        ``,
+        `Szeretné, hogy e-mailben is elküldjük az árajánlatot?`,
     ].join("\n");
 }
 
@@ -120,36 +137,36 @@ Végigvezeted az ügyfelet az alábbi kérdéseken, majd elkéred az elérhetős
 KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!):
 1. install_type — "Új kazán beépítéséről vagy egy meglévő kazán cseréjéről van szó?" Értékek: "csere" vagy "uj".
 2. current_boiler — CSAK ha "csere": "Jelenleg milyen kazánja van?" Értékek: "nyilt" (nyílt égésterű), "kondenzacios" (kondenzációs), "turbos" (turbós). Ha "uj", ezt hagyd ki és állítsd "nincs"-re.
-3. new_boiler — "Milyen típusú új kazánt szeretne?" Értékek: "kombi_24" (kombi átfolyós 24 kW), "tarolos_46" (tárolós, 46 literes beépített tárolóval, 24 kW), "kulso_125" (külső tárolós 125 literes, 24 kW fűtő kazánnal). Ha bizonytalan, kérdezz rá a melegvíz-igényre (lásd 9. pont) és javasolj.
+3. new_boiler — "Milyen típusú új kazánt szeretne?" Értékek: "kombi_24" (kombi átfolyós 24 kW), "tarolos_46" (tárolós, 46 literes beépített tárolóval, 24 kW), "kulso_125" (külső tárolós 125 literes, 24 kW fűtő kazánnal). Ha bizonytalan, röviden segíts a választásban.
 4. flue — "Hogyan oldható meg a kémény / égéstermék-elvezetés?" Értékek: "teto" (kazántól a tetőn kivezetve), "tegla_kemeny" (épített tégla kéménybe), "gyujtokemeny" (társasházi gyűjtőkémény).
 5. rcd — "Van-e a lakásban életvédelmi (Fi) relé?" Értékek: "van" vagy "nincs".
 6. wet_system — "Szükséges a vizes (fűtési) rendszerre kötés mágneses iszapleválasztóval (anyag + munkadíj)?" Értékek: "igen" vagy "nem".
 7. commissioning — "Kéri a gázkazán gyári üzembe helyezését?" Értékek: "igen" vagy "nem".
 8. demolition — "Szükséges a régi kazán és kémény bontása?" Értékek: "igen" vagy "nem". (Új kiépítésnél jellemzően "nem".)
-9. hot_water_note — "Hány fürdőszoba / hány fő használja a meleg vizet?" (Szabad szöveg. Segíthet a kazántípus választásában, de árat nem befolyásol.)
-10. urgency — "Mennyire sürgős? (pl. azonnali, mert elromlott / pár héten belül / csak tájékozódik)" (Szabad szöveg.)
+9. urgency — "Mennyire sürgős? (pl. azonnali, mert elromlott / pár héten belül / csak tájékozódik)" (Szabad szöveg.)
 
 ELÉRHETŐSÉGEK — KÜLÖN-KÜLÖN kérdezd, egyesével (NE egyszerre, NE gombokkal):
-11. name — "Mi a neve?"
-12. email — "Mi az e-mail címe?"
-13. phone — "Mi a telefonszáma?"
-14. postal_code — "Mi az irányítószáma?"
-15. budget — "Nagyjából milyen keretet / büdzsét szánna rá?"
+10. name — "Mi a neve?"
+11. email — "Mi az e-mail címe?"
+12. phone — "Mi a telefonszáma?"
+13. postal_code — "Mi az irányítószáma?"
+14. budget — "Nagyjából milyen keretet / büdzsét szánna rá?"
 
 SZABÁLYOK
 - Az ügyfél írhat szabad szöveggel is — értelmezd a válaszát és rendeld hozzá a megfelelő értéket.
 - Ha egy válasz nem egyértelmű, EGYSZER kérdezz vissza, utána lépj tovább.
 - Ne ígérj fix időpontot. Árat ne mondj a folyamat közben.
 
-BEFEJEZÉS
-Amikor MINDEN adat megvan (install_type, new_boiler, flue, rcd, wet_system, commissioning, demolition, hot_water_note, urgency, name, email, phone, postal_code, budget — és csere esetén current_boiler is), írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!"), majd a válasz LEGVÉGÉRE tedd ki PONTOSAN ezt a rejtett blokkot (az ügyfél ezt nem látja):
-<!--QUOTE_JSON:{"install_type":"...","current_boiler":"...","new_boiler":"...","flue":"...","rcd":"...","wet_system":"...","commissioning":"...","demolition":"...","hot_water_note":"...","urgency":"...","name":"...","email":"...","phone":"...","postal_code":"...","budget":"..."}-->
-Csak akkor add ki a blokkot, ha tényleg minden adat megvan. Az értékek pontosan a fent megadott kulcsok legyenek.
+REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
+MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett mezők értéke üres string (""). SOSE találgass — csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
+<!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","wet_system":"","commissioning":"","demolition":"","urgency":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
+A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs; wet_system/commissioning/demolition: igen|nem. A többi (urgency, name, email, phone, postal_code, budget) szabad szöveg.
+Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") — és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 
 GYORSVÁLASZ GOMBOK
 Választós kérdéseknél (install_type, current_boiler, new_boiler, flue, rcd, wet_system, commissioning, demolition) a válaszod LEGVÉGÉRE tedd ki a felkínált opciókat ebben a rejtett formában (az ügyfél gombként látja, de szabadon is írhat):
 <!--CHIPS:["Opció 1","Opció 2"]-->
-Magyar, rövid címkéket adj (pl. ["Csere","Új beépítés"], ["Nyílt égésterű","Kondenzációs","Turbós"], ["Igen","Nem"]). A melegvíz, sürgősség és az ELÉRHETŐSÉGEK kérdéseknél (név, e-mail, telefon, irányítószám, büdzsé) NE adj gombokat.`;
+Magyar, rövid címkéket adj (pl. ["Csere","Új beépítés"], ["Nyílt égésterű","Kondenzációs","Turbós"], ["Igen","Nem"]). A sürgősség és az ELÉRHETŐSÉGEK kérdéseknél (név, e-mail, telefon, irányítószám, büdzsé) NE adj gombokat. A DATA és a CHIPS blokk is szerepelhet ugyanabban a válaszban.`;
 
 // ---------------------------------------------------------------------------
 //  AI providers — each takes normalized messages and returns { ok, text, error }
@@ -220,7 +237,21 @@ export default async function handler(request, response) {
     }
 
     try {
-        const { question, history } = request.body || {};
+        const { question, history, action, lead } = request.body || {};
+
+        // --- ACTION: customer asked us to e-mail them the quote ---
+        if (action === "email_customer" && lead?.sel && lead?.quote) {
+            const ok = await sendQuoteEmail(lead.sel, lead.quote, {
+                to: lead.sel.email,
+                toCustomer: true,
+            });
+            return response.status(200).json({
+                answer: ok
+                    ? `Elküldtük az árajánlatot a megadott e-mail címre (${lead.sel.email}). 📧 Ha nem találja, nézze meg a Spam mappát is.`
+                    : `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. 📞 +36 30 260 57 56`,
+                chips: [],
+            });
+        }
 
         // Normalized message list: [{ role: "system"|"user"|"assistant", content }]
         // The widget sends history as [{ role: "user"|"assistant", content }].
@@ -252,29 +283,36 @@ export default async function handler(request, response) {
             return response.status(200).json({ answer: "Értem, de ezt nem sikerült feldolgoznom. Megfogalmaznád másképp?" });
         }
 
-        // --- QUOTE PROCESSING ---
-        const quoteMatch = aiAnswer.match(/<!--QUOTE_JSON:(.*?)-->/s);
-        if (quoteMatch) {
-            try {
-                const sel = JSON.parse(quoteMatch[1]);
-                const quote = buildQuote(sel);
+        // --- STATE: extract the running DATA block the model maintains ---
+        let sel = null;
+        const dataMatch = aiAnswer.match(/<!--DATA:(.*?)-->/s);
+        if (dataMatch) {
+            try { sel = JSON.parse(dataMatch[1]); }
+            catch (e) { console.error("DATA parse fail:", e.message); }
+            aiAnswer = aiAnswer.replace(/<!--DATA:.*?-->/s, "").trim();
+        }
 
-                console.log("\n========================================");
-                console.log("🎯 ÚJ ÁRAJÁNLAT / LEAD");
-                console.log(`Ügyfél: ${sel.name} | ${sel.phone} | ${sel.email}`);
-                console.log(`Irsz.: ${sel.postal_code} | Keret: ${sel.budget}`);
-                console.log(`Becsült végösszeg: ${formatHuf(quote.total)}`);
-                console.log("========================================\n");
+        // --- COMPLETION CHECK (backend-decided, model-independent) ---
+        if (isQuoteReady(sel)) {
+            const quote = buildQuote(sel);
 
-                await sendQuoteEmail(sel, quote);
+            console.log("\n========================================");
+            console.log("🎯 ÚJ ÁRAJÁNLAT / LEAD");
+            console.log(`Ügyfél: ${sel.name} | ${sel.phone} | ${sel.email}`);
+            console.log(`Irsz.: ${sel.postal_code} | Keret: ${sel.budget}`);
+            console.log(`Becsült végösszeg: ${formatHuf(quote.total)}`);
+            console.log("========================================\n");
 
-                // Replace AI text with the deterministic, correctly-priced quote.
-                return response.status(200).json({ answer: renderCustomerQuote(quote, sel) });
-            } catch (parseErr) {
-                console.error("Failed to parse QUOTE_JSON:", parseErr.message);
-                // Fall through: strip marker, return whatever the AI said.
-                aiAnswer = aiAnswer.replace(/<!--QUOTE_JSON:.*?-->/s, "").trim();
-            }
+            // Always notify the owner.
+            await sendQuoteEmail(sel, quote, { to: process.env.LEAD_EMAIL_TO || "pirint.milan@gmail.com", toCustomer: false });
+
+            // Show the itemised quote in chat + offer to e-mail it to the customer.
+            return response.status(200).json({
+                answer: renderCustomerQuote(quote, sel),
+                chips: [],
+                emailOffer: true,
+                lead: { sel, quote },
+            });
         }
 
         // --- QUICK-REPLY CHIPS ---
@@ -297,17 +335,23 @@ export default async function handler(request, response) {
 }
 
 // ---------------------------------------------------------------------------
-//  E-mail (Resend) — sends the full itemised quote to the company owner.
+//  E-mail (Resend). opts = { to, toCustomer }. Returns true on success.
+//  - owner mail: full client details + quote
+//  - customer mail: friendly "your quote" version
 // ---------------------------------------------------------------------------
-async function sendQuoteEmail(sel, quote) {
+async function sendQuoteEmail(sel, quote, opts = {}) {
     const resendKey = process.env.RESEND_API_KEY;
-    const toEmail = process.env.LEAD_EMAIL_TO || "pirint.milan@gmail.com";
-    // Default sender works with no domain setup. Swap to your verified domain later.
+    const toEmail = opts.to || process.env.LEAD_EMAIL_TO || "pirint.milan@gmail.com";
     const fromEmail = process.env.LEAD_EMAIL_FROM || "Kazán Kecskemét <onboarding@resend.dev>";
+    const toCustomer = !!opts.toCustomer;
 
     if (!resendKey) {
         console.log("⚠️  Nincs RESEND_API_KEY — az e-mail kimarad. A lead a fenti logban szerepel.");
-        return;
+        return false;
+    }
+    if (!toEmail) {
+        console.log("⚠️  Nincs címzett e-mail cím — kihagyva.");
+        return false;
     }
 
     const itemRows = quote.items
@@ -316,51 +360,60 @@ async function sendQuoteEmail(sel, quote) {
 
     const installTypeLabel = quote.isReplacement ? "Meglévő kazán cseréje" : "Új rendszer kiépítése";
 
-    const html = `
-    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#111827">
-      <div style="background:#111827;color:#FBBF24;padding:20px 24px;border-radius:12px 12px 0 0">
-        <h2 style="margin:0">Új árajánlat — Kazán Kecskemét</h2>
-      </div>
-      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
+    // Client-details block is only included in the owner's copy.
+    const clientBlock = toCustomer ? "" : `
         <h3 style="margin:0 0 8px">Ügyfél adatai</h3>
         <p style="margin:4px 0"><b>Név:</b> ${sel.name || "-"}</p>
         <p style="margin:4px 0"><b>Telefon:</b> ${sel.phone || "-"}</p>
         <p style="margin:4px 0"><b>E-mail:</b> ${sel.email || "-"}</p>
         <p style="margin:4px 0"><b>Irányítószám:</b> ${sel.postal_code || "-"}</p>
         <p style="margin:4px 0"><b>Keret / büdzsé:</b> ${sel.budget || "-"}</p>
-        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+        <p style="margin:4px 0"><b>Sürgősség:</b> ${sel.urgency || "-"}</p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`;
+
+    const heading = toCustomer ? "Az Ön árajánlata — Kazán Kecskemét" : "Új árajánlat — Kazán Kecskemét";
+    const intro = toCustomer
+        ? `<p style="margin:0 0 12px">Kedves ${sel.name || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:</p>`
+        : "";
+
+    const html = `
+    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#111827">
+      <div style="background:#111827;color:#FBBF24;padding:20px 24px;border-radius:12px 12px 0 0">
+        <h2 style="margin:0">${heading}</h2>
+      </div>
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
+        ${intro}${clientBlock}
         <h3 style="margin:0 0 8px">Munka jellege</h3>
         <p style="margin:4px 0"><b>Típus:</b> ${installTypeLabel}</p>
-        <p style="margin:4px 0"><b>Melegvíz-igény:</b> ${sel.hot_water_note || "-"}</p>
-        <p style="margin:4px 0"><b>Sürgősség:</b> ${sel.urgency || "-"}</p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
         <h3 style="margin:0 0 8px">Kalkulált árajánlat</h3>
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
           <tr><td style="padding:10px 12px;font-weight:bold">Becsült végösszeg</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#025888">${formatHuf(quote.total)}</td></tr>
         </table>
-        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció. A kazán pontos típusa/márkája, valamint a gázterv és szolgáltatói üzembe helyezés a helyszíni felmérés után véglegesül.</p>
+        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció. A kazán pontos típusa/márkája, valamint a gázterv és szolgáltatói üzembe helyezés a helyszíni felmérés után véglegesül.${toCustomer ? " 📞 +36 30 260 57 56" : ""}</p>
       </div>
     </div>`;
 
-    const subject = `[ÚJ ÁRAJÁNLAT] ${sel.postal_code || ""} — ${sel.name || ""} — ${formatHuf(quote.total)}`;
+    const subject = toCustomer
+        ? `Az Ön árajánlata — Kazán Kecskemét — ${formatHuf(quote.total)}`
+        : `[ÚJ ÁRAJÁNLAT] ${sel.postal_code || ""} — ${sel.name || ""} — ${formatHuf(quote.total)}`;
 
     try {
         const emailRes = await fetch("https://api.resend.com/emails", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${resendKey}`,
-            },
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${resendKey}` },
             body: JSON.stringify({ from: fromEmail, to: [toEmail], subject, html }),
         });
 
         const result = await emailRes.json();
         if (emailRes.ok) {
-            console.log("✅ Árajánlat e-mail elküldve:", result.id);
-        } else {
-            console.error("❌ Resend hiba:", JSON.stringify(result));
+            console.log(`✅ Árajánlat e-mail elküldve (${toCustomer ? "ügyfél" : "tulajdonos"}):`, result.id);
+            return true;
         }
+        console.error("❌ Resend hiba:", JSON.stringify(result));
+        return false;
     } catch (emailErr) {
         console.error("❌ Nem sikerült elküldeni az e-mailt:", emailErr.message);
+        return false;
     }
 }
