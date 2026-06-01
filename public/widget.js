@@ -197,10 +197,21 @@
   }
 
   function renderMarkdown(text) {
-    let html = text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-    html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/\n/g, "<br>");
+    const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const inline = (s) =>
+      esc(s)
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+    // Build clean block elements (bullets, headers, paragraphs) for readability.
+    let html = "";
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (line === "") { html += '<div class="faq-sp"></div>'; continue; }
+      if (line.startsWith("•")) { html += '<div class="faq-li">' + inline(line) + "</div>"; continue; }
+      if (/^\*\*.*\*\*:?$/.test(line)) { html += '<div class="faq-h">' + inline(line) + "</div>"; continue; }
+      html += '<div class="faq-p">' + inline(line) + "</div>";
+    }
     return html;
   }
 
