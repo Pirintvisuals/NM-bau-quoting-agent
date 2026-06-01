@@ -95,9 +95,12 @@
     const launcher = document.querySelector(".faq-chat-launcher");
 
     if (chatOpen) {
-      chatWindow.classList.add("closing");
+      // Close: animate, then HIDE (keep in DOM so the conversation persists).
       const w = chatWindow;
-      setTimeout(() => w && w.remove(), 180);
+      w.classList.add("closing");
+      setTimeout(() => {
+        if (w) { w.style.display = "none"; w.classList.remove("closing"); }
+      }, 180);
       chatOpen = false;
       if (launcher) launcher.classList.remove("active");
     } else {
@@ -105,7 +108,17 @@
         tooltip.classList.remove("show");
         setTimeout(() => tooltip.classList.add("hidden"), 300);
       }
-      openChat();
+      if (!chatWindow) {
+        openChat(); // build once (also fires the greeting + first question)
+      } else {
+        // Re-show the existing window with its messages intact.
+        chatWindow.style.display = "flex";
+        chatWindow.style.animation = "none";
+        void chatWindow.offsetWidth; // force reflow so the open animation replays
+        chatWindow.style.animation = "";
+        scrollToBottom();
+        setTimeout(() => inputElement && inputElement.focus(), 120);
+      }
       chatOpen = true;
       if (launcher) launcher.classList.add("active");
     }
