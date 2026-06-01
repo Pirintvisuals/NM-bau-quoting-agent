@@ -1,17 +1,24 @@
 (function () {
   // Configuration with defaults for local development
-  const config = window.LANDSCALE_CONFIG || {};
+  const config = window.KAZAN_CONFIG || {};
   const apiUrl = config.apiUrl || "/api/faq-agent";
   const assetsUrl = config.assetsUrl || ""; // e.g. "https://your-app.vercel.app"
+  const PHONE = "+36 30 260 57 56";
+  const BRAND = "Kazán Kecskemét";
 
   let chatOpen = false;
   let chatWindow = null;
   let messagesContainer = null;
   let inputElement = null;
   let sending = false;
-  let conversationHistory = []; // Track conversation history
+  let conversationHistory = []; // [{ role: "user"|"assistant", content: "..." }]
+  let started = false;
 
   let container = null;
+
+  function logoSrc() {
+    return assetsUrl ? `${assetsUrl}/logo.svg` : "logo.svg";
+  }
 
   function createContainer() {
     container = document.createElement("div");
@@ -26,45 +33,35 @@
     btn.className = "faq-chat-launcher";
 
     const img = document.createElement("img");
-    img.src = assetsUrl ? `${assetsUrl}/logo.png` : "logo.png"; // Updated to user's new logo
-    img.alt = "Chat with Landscale";
+    img.src = logoSrc();
+    img.alt = `Csevegés — ${BRAND}`;
     img.className = "faq-chat-launcher-icon";
 
     btn.appendChild(img);
     btn.onclick = toggleChat;
     container.appendChild(btn);
 
-    // Create floating tooltip
-    console.log("Creating tooltip...");
     const tooltip = document.createElement("div");
     tooltip.className = "faq-chat-tooltip";
-    // Compelling engagement question
-    tooltip.innerHTML = "Hi there! 👋<br>Planning a garden project?";
+    tooltip.innerHTML = "Üdv! 👋<br>Kérjen pár kattintással árajánlatot kazánra.";
 
-    // Close button for tooltip
     const closeBtn = document.createElement("span");
     closeBtn.className = "faq-tooltip-close";
     closeBtn.innerHTML = "×";
     closeBtn.onclick = (e) => {
       e.stopPropagation();
       tooltip.classList.add("hidden");
-      window.parent.postMessage('hideTooltip', '*');
     };
 
     tooltip.appendChild(closeBtn);
     tooltip.onclick = () => {
       tooltip.classList.add("hidden");
-      window.parent.postMessage('hideTooltip', '*');
       toggleChat();
     };
 
     container.appendChild(tooltip);
 
-    // Show tooltip after 1.5 seconds for quick engagement
-    setTimeout(() => {
-      tooltip.classList.add("show");
-      window.parent.postMessage('showTooltip', '*');
-    }, 1500);
+    setTimeout(() => tooltip.classList.add("show"), 1500);
   }
 
   function toggleChat() {
@@ -73,19 +70,13 @@
     if (chatOpen) {
       chatWindow.remove();
       chatOpen = false;
-      // Notify parent to close
-      window.parent.postMessage('closeChat', '*');
     } else {
       if (tooltip) {
-        // Just hide it, don't remove so we can show it again next session if needed
         tooltip.classList.remove("show");
-        window.parent.postMessage('hideTooltip', '*');
         setTimeout(() => tooltip.classList.add("hidden"), 300);
       }
       openChat();
       chatOpen = true;
-      // Notify parent to open
-      window.parent.postMessage('openChat', '*');
     }
   }
 
@@ -97,12 +88,13 @@
     header.className = "faq-chat-header";
 
     const logo = document.createElement("img");
-    logo.src = assetsUrl ? `${assetsUrl}/logo.png` : "logo.png"; // Updated logo
-    logo.alt = "Landscale";
+    logo.src = logoSrc();
+    logo.alt = BRAND;
     header.appendChild(logo);
 
-    const headerText = document.createElement("span");
-    headerText.textContent = "Landscale AI"; // Updated Name
+    const headerText = document.createElement("div");
+    headerText.className = "faq-header-text";
+    headerText.innerHTML = `<span class="faq-header-title">${BRAND}</span><a class="faq-header-phone" href="tel:${PHONE.replace(/\s/g, "")}">📞 ${PHONE}</a>`;
     header.appendChild(headerText);
 
     messagesContainer = document.createElement("div");
@@ -113,16 +105,14 @@
 
     inputElement = document.createElement("input");
     inputElement.type = "text";
-    inputElement.placeholder = "Ask about landscaping, patios, or design..."; // More specific placeholder
+    inputElement.placeholder = "Írja be a válaszát…";
 
     const sendBtn = document.createElement("button");
-    sendBtn.textContent = "Send";
+    sendBtn.textContent = "Küldés";
 
-    sendBtn.onclick = sendMessage;
+    sendBtn.onclick = () => sendMessage();
     inputElement.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        sendMessage();
-      }
+      if (e.key === "Enter") sendMessage();
     });
 
     inputBar.appendChild(inputElement);
@@ -134,10 +124,43 @@
 
     container.appendChild(chatWindow);
 
-    addMessage(
-      "bot",
-      "Hello! I'm Milán's digital assistant. How can I help you regarding your garden project today?"
-    );
+    // Kick off the conversation through the API so the AI controls the script.
+    if (!started) {
+      started = true;
+      addMessage("bot", `Üdvözlöm a ${BRAND} árajánló asszisztensénél! Pár kérdés alapján elkészítem az előzetes árajánlatát.`);
+      sendMessage("Szeretnék árajánlatot kazán beépítésére / cseréjére.", true);
+    }
+  }
+
+  function renderMarkdown(text) {
+    let html = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/\n/g, "<br>");
+    return html;
+  }
+
+  function clearChips() {
+    const old = messagesContainer.querySelector(".faq-chips");
+    if (old) old.remove();
+  }
+
+  function renderChips(chips) {
+    clearChips();
+    if (!chips || !chips.length) return;
+    const wrap = document.createElement("div");
+    wrap.className = "faq-chips";
+    chips.forEach((label) => {
+      const chip = document.createElement("button");
+      chip.className = "faq-chip";
+      chip.textContent = label;
+      chip.onclick = () => {
+        clearChips();
+        sendMessage(label);
+      };
+      wrap.appendChild(chip);
+    });
+    messagesContainer.appendChild(wrap);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
 
   function addMessage(sender, text) {
@@ -146,14 +169,18 @@
 
     const label = document.createElement("div");
     label.className = "message-label";
-    label.textContent = sender === "bot" ? "Gardening Agent" : "You";
+    label.textContent = sender === "bot" ? BRAND : "Ön";
 
     const bubble = document.createElement("div");
     bubble.className = "message-bubble";
-    if (text === "Thinking...") {
+    if (text === "…") {
       bubble.className += " thinking";
+      bubble.textContent = text;
+    } else if (sender === "bot") {
+      bubble.innerHTML = renderMarkdown(text);
+    } else {
+      bubble.textContent = text;
     }
-    bubble.textContent = text;
 
     msg.appendChild(label);
     msg.appendChild(bubble);
@@ -161,57 +188,50 @@
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
 
-  async function sendMessage() {
+  // text: message to send. hidden: don't show as a user bubble (used for the kickoff).
+  async function sendMessage(presetText, hidden) {
     if (sending) return;
-    const text = (inputElement.value || "").trim();
+    const text = (presetText !== undefined ? presetText : (inputElement.value || "")).trim();
     if (!text) return;
 
-    addMessage("user", text);
-    inputElement.value = "";
+    clearChips();
+    if (!hidden) addMessage("user", text);
+    if (presetText === undefined) inputElement.value = "";
     sending = true;
 
-    // Add user message to conversation history
-    conversationHistory.push({
-      role: "user",
-      parts: [{ text: text }]
-    });
+    conversationHistory.push({ role: "user", content: text });
 
-    addMessage("bot", "Thinking...");
+    addMessage("bot", "…");
 
     try {
       const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: text,
-          history: conversationHistory // Send conversation history
-        }),
+        body: JSON.stringify({ question: text, history: conversationHistory }),
       });
 
       const botMessages = messagesContainer.querySelectorAll(".faq-chat-message.bot");
       const lastBot = botMessages[botMessages.length - 1];
-      if (lastBot && lastBot.textContent.endsWith("Thinking...")) {
-        lastBot.remove();
-      }
+      if (lastBot && lastBot.textContent.endsWith("…")) lastBot.remove();
 
       if (!res.ok) {
-        addMessage("bot", "Sorry, something went wrong. Please try again later.");
+        addMessage("bot", "Elnézést, hiba történt. Kérjük, próbálja újra később.");
         sending = false;
         return;
       }
 
       const data = await res.json();
-      const botResponse = data.answer || "Sorry, I could not find an answer.";
+      const botResponse = data.answer || "Elnézést, nem találtam választ.";
       addMessage("bot", botResponse);
+      conversationHistory.push({ role: "assistant", content: botResponse });
 
-      // Add bot response to conversation history
-      conversationHistory.push({
-        role: "model",
-        parts: [{ text: botResponse }]
-      });
+      renderChips(data.chips);
     } catch (err) {
       console.error(err);
-      addMessage("bot", "Sorry, there was a problem connecting to the server.");
+      const botMessages = messagesContainer.querySelectorAll(".faq-chat-message.bot");
+      const lastBot = botMessages[botMessages.length - 1];
+      if (lastBot && lastBot.textContent.endsWith("…")) lastBot.remove();
+      addMessage("bot", "Elnézést, nem sikerült kapcsolódni a szerverhez.");
     } finally {
       sending = false;
     }

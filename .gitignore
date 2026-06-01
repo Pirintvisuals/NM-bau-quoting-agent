@@ -4,3 +4,8 @@ node_modules
 dist
 build
 .netlify
+
+# unrelated nested projects / stray files
+Mimosa-agent/
+mimosabot/
+viszCAD
