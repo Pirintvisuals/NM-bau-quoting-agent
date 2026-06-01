@@ -38,21 +38,22 @@ the `PRICES` object at the top of [`api/faq-agent.js`](api/faq-agent.js).
 | 3 | **Új kazán típusa** | kombi 24 kW +450 000 · tárolós 46 L +900 000 · külső 125 L +900 000 |
 | 4 | **Kémény / égéstermék‑elvezetés** | tetőn ki +380 000 · tégla kéménybe +600 000 · társasházi gyűjtőkémény +600 000 |
 | 5 | **Életvédelmi (Fi) relé** | van +50 000 · nincs +100 000 |
-| 6 | **Vizes rendszerre kötés (iszapleválasztóval)?** | igen +300 000 · nem +0 |
-| 7 | **Gyári üzembe helyezés?** | igen +50 000 · nem +0 |
-| 8 | **Régi kazán + kémény bontása?** | igen +90 000 · nem +0 |
+| — | **Always added (not asked)** | vizes rendszerre kötés +300 000 · gyári üzembe helyezés +50 000 · régi kazán/kémény bontása +90 000 |
 
-**Total = sum of the selected rows.**
+**Total = sum of the selected rows + the three always‑added standard costs.**
 
-### Decisions baked into the logic
-- **Standard costs:** the three items above (wet‑system +300 000, commissioning
-  +50 000, demolition +90 000) are now **asked explicitly** as yes/no questions —
-  each is added only if the customer answers "igen".
-- **Current boiler** only counts on a replacement (a new install has no existing
-  boiler → treated as `nincs`, +0).
-- **Contact details** are collected **one field at a time** at the very end
+### Decisions baked into the logic (confirmed by the company)
+- **Prices are GROSS (ÁFA included) and include the boiler appliance + full
+  installation** — the displayed total is what the customer pays
+  (`APPLIANCE_INCLUDED = true`).
+- **Standard costs** (wet‑system +300 000, commissioning +50 000, demolition
+  +90 000) are **always added to every quote** and are **not asked** — they're
+  standard on every job.
+- **Current boiler** only counts on a replacement (a new install → `nincs`, +0).
+- **No gázterv** line — the company confirmed it isn't needed.
+- **Only 24 kW** appliances; exact brand/model is decided at the site survey.
+- **Contact details** collected one field at a time at the end
   (name → e‑mail → phone → postal code → budget).
-- **VAT:** none applied — prices displayed exactly as on the sheet.
 
 ### Extra questions added (beyond the sheet)
 These improve lead quality but **do not** change the price:
@@ -66,17 +67,6 @@ These improve lead quality but **do not** change the price:
 - Completion is decided by the **backend** (`isQuoteReady`) from a running hidden
   state block the model maintains — so the quote always appears even if the model
   phrasing varies. The model never computes the price.
-
-### ⚠️ Confirm with the company before go‑live
-Whether the boiler‑type prices (450 000 / 900 000) **include the appliance** or
-are **installation only** is unconfirmed. The customer‑facing wording currently
-says the figure is the *installation* and the exact appliance is finalised at the
-site survey. If the company confirms it's all‑in, set
-`APPLIANCE_INCLUDED = true` in `api/faq-agent.js` to switch the wording.
-
-The bot also tells the customer that a **gas plan (gázterv)** and provider
-commissioning may be required and are quoted separately after a site survey — no
-fake number is invented for them.
 
 ---
 

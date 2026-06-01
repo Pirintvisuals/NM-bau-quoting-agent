@@ -46,9 +46,9 @@ const PRICES = {
     demolition: { huf: 90000, label: "Régi kazán és kémény bontása" },
 };
 
-// If the company confirms the boiler-type price already includes the appliance,
-// set this to true to change the customer-facing wording. Default: false (safe).
-const APPLIANCE_INCLUDED = false;
+// Company confirmed: the boiler-type prices include the appliance, and all
+// prices are GROSS (ÁFA included) — what the customer actually pays.
+const APPLIANCE_INCLUDED = true;
 
 // ---------------------------------------------------------------------------
 //  Helpers
@@ -72,11 +72,10 @@ function buildQuote(sel) {
     add(PRICES.flue[sel.flue]);
     add(PRICES.rcd[sel.rcd]);
 
-    // The three "standard" costs are now asked explicitly; add only if "igen".
-    const yes = (v) => String(v || "").toLowerCase() === "igen";
-    if (yes(sel.wet_system)) add(PRICES.standard.wet_system);
-    if (yes(sel.commissioning)) add(PRICES.standard.commissioning);
-    if (yes(sel.demolition)) add(PRICES.demolition);
+    // Standard costs — always included on every quote (company: not asked).
+    add(PRICES.standard.wet_system);
+    add(PRICES.standard.commissioning);
+    add(PRICES.demolition);
 
     const total = items.reduce((s, i) => s + i.huf, 0);
     return { items, total, isReplacement };
@@ -88,7 +87,6 @@ function isQuoteReady(s) {
     const filled = (k) => s[k] != null && String(s[k]).trim() !== "";
     const required = [
         "install_type", "new_boiler", "flue", "rcd",
-        "wet_system", "commissioning", "demolition",
         "urgency", "name", "email", "phone", "postal_code", "budget",
     ];
     if (!required.every(filled)) return false;
@@ -100,19 +98,16 @@ function isQuoteReady(s) {
 // Customer-facing Hungarian estimate text (numbers come from buildQuote).
 function renderCustomerQuote(quote, sel) {
     const lines = quote.items.map(i => `• ${i.label}: ${formatHuf(i.huf)}`).join("\n");
-    const applianceNote = APPLIANCE_INCLUDED
-        ? "Az összeg a kazánkészüléket és a teljes kivitelezést tartalmazza."
-        : "Az összeg a kivitelezés (beépítés) díja; a kazán pontos márkája és típusa a helyszíni felmérés után véglegesül.";
+    const applianceNote = "Az ár tartalmazza a kazánkészüléket és a teljes beépítést — bruttó (ÁFÁ-val), ezt fizeti az ügyfél. A pontos márka/típus a helyszíni felmérés után dől el.";
 
     return [
         `Köszönöm, ${sel.name || ""}! Íme a tájékoztató árajánlatod:`,
         ``,
         lines,
         ``,
-        `**Becsült végösszeg: ${formatHuf(quote.total)}**`,
+        `**Becsült végösszeg: ${formatHuf(quote.total)} (bruttó)**`,
         ``,
         `ℹ️ ${applianceNote}`,
-        `ℹ️ Gázkazán cseréjéhez/kiépítéséhez jellemzően gázterv és a szolgáltatói üzembe helyezés is szükséges — ezt a helyszíni felmérés után, külön tételként adjuk meg.`,
         ``,
         `Ez egy előzetes, tájékoztató jellegű kalkuláció. Az adataidat továbbítottuk a Kazán Kecskeméthez, hamarosan keresünk a pontosításért. 📞 +36 30 260 57 56`,
         ``,
@@ -143,17 +138,16 @@ KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!):
 3. new_boiler — "Milyen új kazánt szeretne?" Segíts a választásban: kombi (24 kW) — azonnal melegíti a vizet, kis helyigény; tárolós beépített 46 literes tartállyal (24 kW) — több melegvíz egyszerre; külső 125 literes tárolóval (24 kW) — a legtöbb melegvíz, nagy családnak. Értékek: "kombi_24", "tarolos_46", "kulso_125".
 4. flue — "Hogyan távozik a kazán füstgáza?" Magyarázd: a tetőn keresztül kivezetve; meglévő, épített tégla kéménybe; vagy társasházi közös (gyűjtő-) kéménybe. Értékek: "teto", "tegla_kemeny", "gyujtokemeny".
 5. rcd — "Van a lakásban életvédelmi (Fi-)relé? Ez egy biztonsági kapcsoló a biztosítékszekrényben (általában 'TESZT' gombbal), ami áramütés ellen véd." Ha nem tudja, kérd, nézze meg a biztosítékszekrényt; ha így sem tudja, állítsd "nincs"-re (biztonságból a kiépítéssel számolunk, a felmérés pontosítja). Értékek: "van" vagy "nincs".
-6. wet_system — "Rákössük az új kazánt a meglévő (radiátoros) fűtési rendszerre, és beépítsünk egy mágneses iszapleválasztót? Ez kiszűri a fűtővízből a rozsdát és iszapot, így tovább bírja a kazán (anyag + munkadíj). Csere esetén szinte mindig ajánlott." Értékek: "igen" vagy "nem".
-7. commissioning — "Kéri a kazán gyári beüzemelését? A gyártó szakembere beállítja és beindítja az új kazánt — ez teszi érvényessé a gyári garanciát." Értékek: "igen" vagy "nem".
-8. demolition — "Szükséges a régi kazán leszerelése és a régi kémény elbontása (a régi készülék elszállításával)?" Értékek: "igen" vagy "nem". (Új kiépítésnél általában "nem".)
-9. urgency — "Mennyire sürgős Önnek? (pl. azonnal kell, mert elromlott / pár héten belül / csak tájékozódik)" (Szabad szöveg.)
+6. urgency — "Mennyire sürgős Önnek? (pl. azonnal kell, mert elromlott / pár héten belül / csak tájékozódik)" (Szabad szöveg.)
 
 ELÉRHETŐSÉGEK — KÜLÖN-KÜLÖN kérdezd, egyesével (NE egyszerre, NE gombokkal):
-10. name — "Mi a neve?"
-11. email — "Mi az e-mail címe?"
-12. phone — "Mi a telefonszáma?"
-13. postal_code — "Mi az irányítószáma?"
-14. budget — "Nagyjából milyen keretet / büdzsét szánna rá?"
+7. name — "Mi a neve?"
+8. email — "Mi az e-mail címe?"
+9. phone — "Mi a telefonszáma?"
+10. postal_code — "Mi az irányítószáma?"
+11. budget — "Nagyjából milyen keretet / büdzsét szánna rá?"
+
+MEGJEGYZÉS: A vizes rendszerre kötést, a gyári üzembe helyezést és a régi kazán/kémény bontását NE kérdezd meg — ezek minden ajánlatban benne vannak, a rendszer automatikusan hozzáadja.
 
 SZABÁLYOK
 - Az ügyfél írhat szabad szöveggel is — értelmezd a válaszát és rendeld hozzá a megfelelő értéket.
@@ -162,12 +156,12 @@ SZABÁLYOK
 
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett mezők értéke üres string (""). SOSE találgass — csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
-<!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","wet_system":"","commissioning":"","demolition":"","urgency":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs; wet_system/commissioning/demolition: igen|nem. A többi (urgency, name, email, phone, postal_code, budget) szabad szöveg.
+<!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","urgency":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
+A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs. A többi (urgency, name, email, phone, postal_code, budget) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") — és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 
 GYORSVÁLASZ GOMBOK
-Választós kérdéseknél (install_type, current_boiler, new_boiler, flue, rcd, wet_system, commissioning, demolition) a válaszod LEGVÉGÉRE tedd ki a felkínált opciókat ebben a rejtett formában (az ügyfél gombként látja, de szabadon is írhat):
+Választós kérdéseknél (install_type, current_boiler, new_boiler, flue, rcd) a válaszod LEGVÉGÉRE tedd ki a felkínált opciókat ebben a rejtett formában (az ügyfél gombként látja, de szabadon is írhat):
 <!--CHIPS:["Opció 1","Opció 2"]-->
 Magyar, rövid címkéket adj (pl. ["Csere","Új beépítés"], ["Nyílt égésterű","Kondenzációs","Turbós"], ["Igen","Nem"]). A sürgősség és az ELÉRHETŐSÉGEK kérdéseknél (név, e-mail, telefon, irányítószám, büdzsé) NE adj gombokat. A DATA és a CHIPS blokk is szerepelhet ugyanabban a válaszban.`;
 
@@ -393,7 +387,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
           <tr><td style="padding:10px 12px;font-weight:bold">Becsült végösszeg</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#025888">${formatHuf(quote.total)}</td></tr>
         </table>
-        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció. A kazán pontos típusa/márkája, valamint a gázterv és szolgáltatói üzembe helyezés a helyszíni felmérés után véglegesül.${toCustomer ? " 📞 +36 30 260 57 56" : ""}</p>
+        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció, bruttó (ÁFÁ-val). Az ár tartalmazza a kazánt és a teljes beépítést; a pontos márka/típus a helyszíni felmérés után véglegesül.${toCustomer ? " 📞 +36 30 260 57 56" : ""}</p>
       </div>
     </div>`;
 
