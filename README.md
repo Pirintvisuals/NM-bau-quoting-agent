@@ -38,30 +38,28 @@ the `PRICES` object at the top of [`api/faq-agent.js`](api/faq-agent.js).
 | 3 | **Új kazán típusa** | kombi 24 kW +450 000 · tárolós 46 L +900 000 · külső 125 L +900 000 |
 | 4 | **Kémény / égéstermék‑elvezetés** | tetőn ki +380 000 · tégla kéménybe +600 000 · társasházi gyűjtőkémény +600 000 |
 | 5 | **Életvédelmi (Fi) relé** | van +50 000 · nincs +100 000 |
-| — | **Always added (not asked)** | vizes rendszerre kötés +300 000 · gyári üzembe helyezés +50 000 · régi kazán/kémény bontása +90 000 |
+| — | **Always added (not asked)** | vizes rendszerre kötés +300 000 · gyári üzembe helyezés +50 000 |
+| — | **Added on replacement only** | régi kazán/kémény bontása +90 000 (csak `csere` esetén) |
 
-**Total = sum of the selected rows + the three always‑added standard costs.**
+**Total = sum of the selected rows + the always‑added standard costs.**
 
 ### Decisions baked into the logic (confirmed by the company)
 - **Prices are GROSS (ÁFA included) and include the boiler appliance + full
   installation** — the displayed total is what the customer pays
   (`APPLIANCE_INCLUDED = true`).
-- **Standard costs** (wet‑system +300 000, commissioning +50 000, demolition
-  +90 000) are **always added to every quote** and are **not asked** — they're
-  standard on every job.
+- **Standard costs** (wet‑system +300 000, commissioning +50 000) are **always
+  added and not asked**. **Demolition +90 000** is added the same way but **only
+  on a replacement** (no old boiler to remove on a new install).
 - **Current boiler** only counts on a replacement (a new install → `nincs`, +0).
 - **No gázterv** line — the company confirmed it isn't needed.
 - **Only 24 kW** appliances; exact brand/model is decided at the site survey.
 - **Contact details** collected one field at a time at the end
   (name → e‑mail → phone → postal code → budget).
 
-### Extra questions added (beyond the sheet)
-These improve lead quality but **do not** change the price:
-1. **Replacement vs. new install** — also gates the current‑boiler question.
-2. **Urgency / timeframe** — strong lead signal for the owner.
-
 ### Quote delivery
-- The itemised estimate is **shown in the chat** as soon as all answers are in.
+- The itemised estimate is **shown in the chat** as soon as all answers are in,
+  split into easy‑to‑read bubbles (price → "just an estimate" note → a recap of
+  everything the customer answered).
 - The **owner always** receives it by e‑mail (with the client's details).
 - The **customer is offered a button** to have the quote e‑mailed to *them* too.
 - Completion is decided by the **backend** (`isQuoteReady`) from a running hidden

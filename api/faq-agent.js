@@ -72,10 +72,11 @@ function buildQuote(sel) {
     add(PRICES.flue[sel.flue]);
     add(PRICES.rcd[sel.rcd]);
 
-    // Standard costs — always included on every quote (company: not asked).
+    // Standard costs — always included (not asked).
     add(PRICES.standard.wet_system);
     add(PRICES.standard.commissioning);
-    add(PRICES.demolition);
+    // Demolition of the OLD boiler/chimney only makes sense on a replacement.
+    if (isReplacement) add(PRICES.demolition);
 
     const total = items.reduce((s, i) => s + i.huf, 0);
     return { items, total, isReplacement };
@@ -87,7 +88,7 @@ function isQuoteReady(s) {
     const filled = (k) => s[k] != null && String(s[k]).trim() !== "";
     const required = [
         "install_type", "new_boiler", "flue", "rcd",
-        "urgency", "name", "email", "phone", "postal_code", "budget",
+        "name", "email", "phone", "postal_code", "budget",
     ];
     if (!required.every(filled)) return false;
     // current_boiler is only required on a replacement
@@ -95,24 +96,55 @@ function isQuoteReady(s) {
     return true;
 }
 
-// Customer-facing Hungarian estimate text (numbers come from buildQuote).
-function renderCustomerQuote(quote, sel) {
-    const lines = quote.items.map(i => `• ${i.label}: ${formatHuf(i.huf)}`).join("\n");
-    const applianceNote = "Az ár tartalmazza a kazánkészüléket és a teljes beépítést — bruttó (ÁFÁ-val), ezt fizeti az ügyfél. A pontos márka/típus a helyszíni felmérés után dől el.";
+// Human-readable Hungarian labels for the recap of what the customer chose.
+const LABELS = {
+    install_type: { csere: "Régi kazán cseréje", uj: "Új beépítés" },
+    current_boiler: { nyilt: "Nyílt égésterű", kondenzacios: "Kondenzációs", turbos: "Turbós", nincs: "—" },
+    new_boiler: { kombi_24: "Kombi (24 kW)", tarolos_46: "Tárolós, 46 l (24 kW)", kulso_125: "Külső tároló, 125 l (24 kW)" },
+    flue: { teto: "Tetőn keresztül", tegla_kemeny: "Tégla kéménybe", gyujtokemeny: "Társasházi gyűjtőkémény" },
+    rcd: { van: "Van", nincs: "Nincs" },
+};
+const lbl = (group, key) => (LABELS[group] && LABELS[group][key]) || key || "—";
 
-    return [
-        `Köszönöm, ${sel.name || ""}! Íme a tájékoztató árajánlatod:`,
+// Customer-facing estimate. Returns sections split by [[SPLIT]] so the widget
+// renders them as separate, easy-to-read chat bubbles. Numbers come from buildQuote.
+function renderCustomerQuote(quote, sel) {
+    const items = quote.items.map(i => `• ${i.label} — **${formatHuf(i.huf)}**`).join("\n");
+
+    // Bubble 1 — the price
+    const priceBubble = [
+        `Köszönöm, ${sel.name || ""}! Íme az előzetes árajánlata. 🙏`,
         ``,
-        lines,
+        `**Tételek:**`,
+        items,
         ``,
-        `**Becsült végösszeg: ${formatHuf(quote.total)} (bruttó)**`,
-        ``,
-        `ℹ️ ${applianceNote}`,
-        ``,
-        `Ez egy előzetes, tájékoztató jellegű kalkuláció. Az adataidat továbbítottuk a Kazán Kecskeméthez, hamarosan keresünk a pontosításért. 📞 +36 30 260 57 56`,
-        ``,
-        `Szeretné, hogy e-mailben is elküldjük az árajánlatot?`,
+        `**Becsült végösszeg: ${formatHuf(quote.total)}** (bruttó, ÁFÁ-val)`,
     ].join("\n");
+
+    // Bubble 2 — "just an estimate" note
+    const noteBubble = [
+        `ℹ️ Ez csak egy **előzetes, tájékoztató becslés** — a végleges ár a helyszíni felmérés után pontosul.`,
+        `Az ár tartalmazza a kazánt és a teljes beépítést; a pontos márka/típus a felmérésnél dől el.`,
+    ].join("\n");
+
+    // Bubble 3 — recap of everything the customer said
+    const recapLines = [`**Az Ön válaszai:**`];
+    recapLines.push(`• Munka: ${lbl("install_type", sel.install_type)}`);
+    if (sel.install_type === "csere") recapLines.push(`• Jelenlegi kazán: ${lbl("current_boiler", sel.current_boiler)}`);
+    recapLines.push(`• Új kazán: ${lbl("new_boiler", sel.new_boiler)}`);
+    recapLines.push(`• Kémény: ${lbl("flue", sel.flue)}`);
+    recapLines.push(`• Életvédelmi (Fi) relé: ${lbl("rcd", sel.rcd)}`);
+    recapLines.push(`• Név: ${sel.name || "—"}`);
+    recapLines.push(`• E-mail: ${sel.email || "—"}`);
+    recapLines.push(`• Telefon: ${sel.phone || "—"}`);
+    recapLines.push(`• Irányítószám: ${sel.postal_code || "—"}`);
+    recapLines.push(`• Tervezett keret: ${sel.budget || "—"}`);
+    recapLines.push(``);
+    recapLines.push(`Az adatait továbbítottuk a Kazán Kecskeméthez — hamarosan keressük! 📞 +36 30 260 57 56`);
+    recapLines.push(``);
+    recapLines.push(`Szeretné, hogy e-mailben is elküldjük az ajánlatot?`);
+
+    return [priceBubble, noteBubble, recapLines.join("\n")].join("\n[[SPLIT]]\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -138,14 +170,13 @@ KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!):
 3. new_boiler — "Milyen új kazánt szeretne?" Segíts a választásban: kombi (24 kW) — azonnal melegíti a vizet, kis helyigény; tárolós beépített 46 literes tartállyal (24 kW) — több melegvíz egyszerre; külső 125 literes tárolóval (24 kW) — a legtöbb melegvíz, nagy családnak. Értékek: "kombi_24", "tarolos_46", "kulso_125".
 4. flue — "Hogyan távozik a kazán füstgáza?" Magyarázd: a tetőn keresztül kivezetve; meglévő, épített tégla kéménybe; vagy társasházi közös (gyűjtő-) kéménybe. Értékek: "teto", "tegla_kemeny", "gyujtokemeny".
 5. rcd — "Van a lakásban életvédelmi (Fi-)relé? Ez egy biztonsági kapcsoló a biztosítékszekrényben (általában 'TESZT' gombbal), ami áramütés ellen véd." Ha nem tudja, kérd, nézze meg a biztosítékszekrényt; ha így sem tudja, állítsd "nincs"-re (biztonságból a kiépítéssel számolunk, a felmérés pontosítja). Értékek: "van" vagy "nincs".
-6. urgency — "Mennyire sürgős Önnek? (pl. azonnal kell, mert elromlott / pár héten belül / csak tájékozódik)" (Szabad szöveg.)
 
 ELÉRHETŐSÉGEK — KÜLÖN-KÜLÖN kérdezd, egyesével (NE egyszerre, NE gombokkal):
-7. name — "Mi a neve?"
-8. email — "Mi az e-mail címe?"
-9. phone — "Mi a telefonszáma?"
-10. postal_code — "Mi az irányítószáma?"
-11. budget — "Nagyjából milyen keretet / büdzsét szánna rá?"
+6. name — "Mi a neve?"
+7. email — "Mi az e-mail címe?"
+8. phone — "Mi a telefonszáma?"
+9. postal_code — "Mi az irányítószáma?"
+10. budget — "Nagyjából milyen keretet szánna rá?"
 
 MEGJEGYZÉS: A vizes rendszerre kötést, a gyári üzembe helyezést és a régi kazán/kémény bontását NE kérdezd meg — ezek minden ajánlatban benne vannak, a rendszer automatikusan hozzáadja.
 
@@ -156,8 +187,8 @@ SZABÁLYOK
 
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett mezők értéke üres string (""). SOSE találgass — csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
-<!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","urgency":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs. A többi (urgency, name, email, phone, postal_code, budget) szabad szöveg.
+<!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
+A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs. A többi (name, email, phone, postal_code, budget) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") — és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 
 GYORSVÁLASZ GOMBOK
@@ -364,8 +395,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <p style="margin:4px 0"><b>Telefon:</b> ${sel.phone || "-"}</p>
         <p style="margin:4px 0"><b>E-mail:</b> ${sel.email || "-"}</p>
         <p style="margin:4px 0"><b>Irányítószám:</b> ${sel.postal_code || "-"}</p>
-        <p style="margin:4px 0"><b>Keret / büdzsé:</b> ${sel.budget || "-"}</p>
-        <p style="margin:4px 0"><b>Sürgősség:</b> ${sel.urgency || "-"}</p>
+        <p style="margin:4px 0"><b>Tervezett keret:</b> ${sel.budget || "-"}</p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`;
 
     const heading = toCustomer ? "Az Ön árajánlata — Kazán Kecskemét" : "Új árajánlat — Kazán Kecskemét";

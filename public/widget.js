@@ -349,8 +349,11 @@
 
       const data = await res.json();
       const botResponse = data.answer || "Elnézést, nem találtam választ.";
-      addMessage("bot", botResponse);
-      conversationHistory.push({ role: "assistant", content: botResponse });
+      // A response may contain [[SPLIT]] markers → render as separate bubbles
+      // for readability (e.g. the final quote: price / note / recap).
+      const parts = botResponse.split("[[SPLIT]]").map(s => s.trim()).filter(Boolean);
+      parts.forEach(p => addMessage("bot", p));
+      conversationHistory.push({ role: "assistant", content: parts.join("\n\n") });
 
       if (data.emailOffer && data.lead) {
         lastLead = data.lead;
