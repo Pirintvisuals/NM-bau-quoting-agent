@@ -32,6 +32,17 @@
     return assetsUrl ? `${assetsUrl}/logo.svg` : "logo.svg";
   }
 
+  // Inject the widget stylesheet so it works on any site it's embedded on,
+  // not just the demo page.
+  function injectStyles() {
+    if (document.getElementById("faq-agent-styles")) return;
+    const link = document.createElement("link");
+    link.id = "faq-agent-styles";
+    link.rel = "stylesheet";
+    link.href = assetsUrl ? `${assetsUrl}/style.css` : "style.css";
+    document.head.appendChild(link);
+  }
+
   function createContainer() {
     container = document.createElement("div");
     container.id = "faq-agent-container";
@@ -357,6 +368,7 @@
   }
 
   function init() {
+    injectStyles();
     createLauncher();
   }
 
