@@ -96,6 +96,28 @@ function isQuoteReady(s) {
     return true;
 }
 
+// Quick-reply buttons for each choice question — decided by the BACKEND from the
+// current state, so the right buttons always appear (not reliant on the model).
+const CHIP_MAP = {
+    install_type: ["Csere", "Új beépítés"],
+    current_boiler: ["Nyílt égésterű", "Kondenzációs", "Turbós"],
+    new_boiler: ["Kombi (24 kW)", "Tárolós (46 l)", "Külső tároló (125 l)"],
+    flue: ["Tetőn keresztül", "Tégla kéménybe", "Társasházi gyűjtőkémény"],
+    rcd: ["Van", "Nincs"],
+};
+function nextChips(sel) {
+    if (!sel || typeof sel !== "object") return CHIP_MAP.install_type;
+    const filled = (k) => sel[k] != null && String(sel[k]).trim() !== "";
+    const order = ["install_type", "current_boiler", "new_boiler", "flue", "rcd",
+        "name", "email", "phone", "postal_code", "budget"];
+    for (const f of order) {
+        // current_boiler only applies to a replacement
+        if (f === "current_boiler" && String(sel.install_type || "").toLowerCase() !== "csere") continue;
+        if (!filled(f)) return CHIP_MAP[f] || [];
+    }
+    return [];
+}
+
 // Human-readable Hungarian labels for the recap of what the customer chose.
 const LABELS = {
     install_type: { csere: "Régi kazán cseréje", uj: "Új beépítés" },
@@ -190,11 +212,7 @@ MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejt
 <!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
 A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs. A többi (name, email, phone, postal_code, budget) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") — és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
-
-GYORSVÁLASZ GOMBOK
-Választós kérdéseknél (install_type, current_boiler, new_boiler, flue, rcd) a válaszod LEGVÉGÉRE tedd ki a felkínált opciókat ebben a rejtett formában (az ügyfél gombként látja, de szabadon is írhat):
-<!--CHIPS:["Opció 1","Opció 2"]-->
-Magyar, rövid címkéket adj (pl. ["Csere","Új beépítés"], ["Nyílt égésterű","Kondenzációs","Turbós"], ["Igen","Nem"]). A sürgősség és az ELÉRHETŐSÉGEK kérdéseknél (név, e-mail, telefon, irányítószám, büdzsé) NE adj gombokat. A DATA és a CHIPS blokk is szerepelhet ugyanabban a válaszban.`;
+A választógombokat a rendszer automatikusan megjeleníti — neked nem kell gombokat kiírnod.`;
 
 // ---------------------------------------------------------------------------
 //  AI providers — each takes normalized messages and returns { ok, text, error }
@@ -343,16 +361,11 @@ export default async function handler(request, response) {
             });
         }
 
-        // --- QUICK-REPLY CHIPS ---
-        let chips = [];
-        const chipsMatch = aiAnswer.match(/<!--CHIPS:(.*?)-->/s);
-        if (chipsMatch) {
-            try {
-                const parsed = JSON.parse(chipsMatch[1]);
-                if (Array.isArray(parsed)) chips = parsed.filter(c => typeof c === "string").slice(0, 5);
-            } catch (e) { /* ignore malformed chips */ }
-            aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
-        }
+        // Strip any chips marker the model may still emit (we compute chips ourselves).
+        aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
+
+        // --- QUICK-REPLY CHIPS (backend-decided, reliable) ---
+        const chips = nextChips(sel);
 
         return response.status(200).json({ answer: aiAnswer, chips });
 
