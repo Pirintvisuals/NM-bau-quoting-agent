@@ -29,7 +29,7 @@
   };
 
   function logoSrc() {
-    return assetsUrl ? `${assetsUrl}/logo.svg` : "logo.svg";
+    return assetsUrl ? `${assetsUrl}/logo.png` : "logo.png";
   }
 
   // Inject the widget stylesheet so it works on any site it's embedded on,

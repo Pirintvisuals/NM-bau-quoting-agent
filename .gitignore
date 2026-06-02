@@ -9,3 +9,6 @@ build
 Mimosa-agent/
 mimosabot/
 viszCAD
+
+# source logo file (kept locally, copied into public/logo.png)
+logo transparent.png
