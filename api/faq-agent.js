@@ -105,6 +105,48 @@ const CHIP_MAP = {
     flue: ["Tetőn keresztül", "Tégla kéménybe", "Társasházi gyűjtőkémény"],
     rcd: ["Van", "Nincs"],
 };
+
+// Order the questions are asked in (current_boiler only on a replacement).
+const FIELD_ORDER = ["install_type", "current_boiler", "new_boiler", "flue", "rcd",
+    "name", "email", "phone", "postal_code", "budget"];
+
+// Maps a clicked chip label -> its canonical value, per field. Lets the BACKEND
+// record an answer the instant it arrives, without waiting for the model's
+// (one-step-behind) state block. Keys are the exact CHIP_MAP labels.
+const CHIP_VALUES = {
+    install_type: { "csere": "csere", "új beépítés": "uj" },
+    current_boiler: { "nyílt égésterű": "nyilt", "kondenzációs": "kondenzacios", "turbós": "turbos" },
+    new_boiler: { "kombi (24 kw)": "kombi_24", "tárolós (46 l)": "tarolos_46", "külső tároló (125 l)": "kulso_125" },
+    flue: { "tetőn keresztül": "teto", "tégla kéménybe": "tegla_kemeny", "társasházi gyűjtőkémény": "gyujtokemeny" },
+    rcd: { "van": "van", "nincs": "nincs" },
+};
+
+// The first still-unanswered field given the current state (= the question the
+// customer is being asked right now). Returns null when everything is filled.
+function pendingField(sel) {
+    const filled = (k) => sel && sel[k] != null && String(sel[k]).trim() !== "";
+    const isCsere = String((sel && sel.install_type) || "").toLowerCase() === "csere";
+    for (const f of FIELD_ORDER) {
+        if (f === "current_boiler" && !isCsere) continue;
+        if (!filled(f)) return f;
+    }
+    return null;
+}
+
+// Given the field the customer is answering + their message, return the canonical
+// value. Choice fields match the clicked chip label (case-insensitive); contact
+// fields take the text as-is. Returns null if it can't be mapped (free-typed
+// choice) so we fall back to the model's captured value.
+function mapAnswer(field, answer) {
+    if (typeof answer !== "string" || !answer.trim()) return null;
+    const a = answer.trim();
+    if (CHIP_VALUES[field]) {
+        return CHIP_VALUES[field][a.toLowerCase()] || null;
+    }
+    // contact fields (name, email, phone, postal_code, budget)
+    if (["name", "email", "phone", "postal_code", "budget"].includes(field)) return a;
+    return null;
+}
 // Parse the hidden running-state block out of any assistant message.
 function extractData(text) {
     if (typeof text !== "string") return null;
@@ -130,16 +172,8 @@ function mergeState(...states) {
 }
 
 function nextChips(sel) {
-    if (!sel || typeof sel !== "object") return CHIP_MAP.install_type;
-    const filled = (k) => sel[k] != null && String(sel[k]).trim() !== "";
-    const order = ["install_type", "current_boiler", "new_boiler", "flue", "rcd",
-        "name", "email", "phone", "postal_code", "budget"];
-    for (const f of order) {
-        // current_boiler only applies to a replacement
-        if (f === "current_boiler" && String(sel.install_type || "").toLowerCase() !== "csere") continue;
-        if (!filled(f)) return CHIP_MAP[f] || [];
-    }
-    return [];
+    const f = pendingField(sel);
+    return f ? (CHIP_MAP[f] || []) : [];
 }
 
 // Human-readable Hungarian labels for the recap of what the customer chose.
@@ -373,7 +407,23 @@ export default async function handler(request, response) {
                 .filter((m) => m && (m.role === "assistant" || m.role === "model"))
                 .map((m) => extractData(m.content))
             : [];
-        const sel = mergeState(state, ...priorSel, currentSel);
+
+        // Accumulated state BEFORE this turn's answer is applied.
+        const baseSel = mergeState(state, ...priorSel);
+
+        // Deterministically record the answer the customer just gave into the
+        // field they were being asked — so the chips advance immediately and
+        // don't lag a step behind the model's (one-turn-late) state block.
+        const determined = {};
+        const pending = pendingField(baseSel);
+        if (pending) {
+            const v = mapAnswer(pending, question);
+            if (v) determined[pending] = v;
+        }
+
+        // Final state: base + this answer + whatever the model captured (model
+        // last, so it can fill free-typed answers our mapper couldn't).
+        const sel = mergeState(baseSel, determined, currentSel);
 
         // --- COMPLETION CHECK (backend-decided, model-independent) ---
         if (isQuoteReady(sel)) {
