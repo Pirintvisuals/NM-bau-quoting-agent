@@ -50,6 +50,14 @@ const PRICES = {
 // prices are GROSS (ÁFA included) — what the customer actually pays.
 const APPLIANCE_INCLUDED = true;
 
+// Offer to e-mail the quote to the CUSTOMER. Requires a real Resend key + a
+// VERIFIED sending domain — until that exists, sending fails and the customer
+// would see an error, so keep this OFF. The owner still gets notified
+// internally. Flip to true (or set EMAIL_OFFER=on in .env) once the domain is
+// live. The owner-quote recap closes cleanly without this offer.
+const EMAIL_OFFER_ENABLED =
+    (process.env.EMAIL_OFFER || "").toLowerCase() === "on";
+
 // ---------------------------------------------------------------------------
 //  Helpers
 // ---------------------------------------------------------------------------
@@ -249,8 +257,10 @@ function renderCustomerQuote(quote, sel) {
     recapLines.push(`• Tervezett keret: ${lbl("budget", sel.budget)}`);
     recapLines.push(``);
     recapLines.push(`Az adatait továbbítottuk a Kazán Kecskeméthez — hamarosan keressük! 📞 +36 30 260 57 56`);
-    recapLines.push(``);
-    recapLines.push(`Szeretné, hogy e-mailben is elküldjük az ajánlatot?`);
+    if (EMAIL_OFFER_ENABLED) {
+        recapLines.push(``);
+        recapLines.push(`Szeretné, hogy e-mailben is elküldjük az ajánlatot?`);
+    }
 
     return [priceBubble, noteBubble, recapLines.join("\n")].join("\n[[SPLIT]]\n");
 }
@@ -487,7 +497,7 @@ export default async function handler(request, response) {
             return response.status(200).json({
                 answer: renderCustomerQuote(quote, sel),
                 chips: [],
-                emailOffer: true,
+                emailOffer: EMAIL_OFFER_ENABLED,
                 lead: { sel, quote },
                 state: sel,
             });
