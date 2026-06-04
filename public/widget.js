@@ -360,7 +360,7 @@
     if (!progressFillEl || !total) return;
     const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
     progressFillEl.style.width = pct + "%";
-    if (progressLabelEl) progressLabelEl.textContent = done + " / " + total;
+    if (progressLabelEl) progressLabelEl.textContent = pct + "%";
     if (progressBarEl) {
       progressBarEl.classList.add("visible");
       progressBarEl.classList.toggle("complete", done >= total);

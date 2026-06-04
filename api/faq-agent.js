@@ -116,9 +116,15 @@ const CHIP_MAP = {
     timeline: ["Amint lehet", "Egy hónapon belül", "Fél éven belül", "Még idén", "Még nem tudom"],
 };
 
-// Order the questions are asked in.
-const FIELD_ORDER = ["current_boiler", "new_boiler", "flue", "rcd",
-    "name", "email", "phone", "postal_code", "budget", "timeline"];
+// Order the questions are asked in: the project questions first, then the
+// contact details at the very end (only asked once the project is fully
+// described, i.e. the progress bar has reached 100%).
+const FIELD_ORDER = ["current_boiler", "new_boiler", "flue", "rcd", "budget", "timeline",
+    "name", "email", "phone", "postal_code"];
+
+// Only the project questions count toward the progress bar (the contact
+// details are not counted — the bar hits 100% right before we ask them).
+const PROGRESS_FIELDS = ["current_boiler", "new_boiler", "flue", "rcd", "budget", "timeline"];
 
 // Maps a clicked chip label -> its canonical value, per field. Lets the BACKEND
 // record an answer the instant it arrives, without waiting for the model's
@@ -344,19 +350,19 @@ Az ügyfél laikus, nem szakember. Minden kérdést EGYSZERŰEN, hétköznapi ny
 
 FONTOS — "NEM TUDOM": minden választós kérdésnél van "Nem tudom" lehetőség is. Ha az ügyfél nem tudja vagy bizonytalan, fogadd el a "nem_tudom" értéket és lépj tovább — a rendszer ilyenkor a legkedvezőbb (legolcsóbb) feltételezéssel számol, a felmérés pedig pontosít. NE erőltesd a választ.
 
-KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!):
+KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!). ELŐSZÖR a projekttel kapcsolatos 1–6. kérdést tedd fel, és CSAK utána, a végén kérd el az elérhetőségeket (7–10.):
 1. current_boiler — "Milyen kazánja van most (vagy mit cserélne)?" Röviden segíts: nyílt égésterű (a régi, a helyiség levegőjét égeti), turbós (ventilátorral kifújja a falon át), kondenzációs (modern, hatékony). Értékek: "nyilt", "kondenzacios", "turbos", "nem_tudom".
 2. new_boiler — "Milyen új kazánt szeretne?" Segíts a választásban: kombi (24 kW) — azonnal melegíti a vizet, kis helyigény; tárolós beépített 46 literes tartállyal (24 kW) — több melegvíz egyszerre; külső 125 literes tárolóval (24 kW) — a legtöbb melegvíz, nagy családnak. Értékek: "kombi_24", "tarolos_46", "kulso_125", "nem_tudom".
 3. flue — "Hogyan távozik a kazán füstgáza?" Magyarázd: a tetőn keresztül kivezetve; meglévő, épített tégla kéménybe; vagy társasházi közös (gyűjtő-) kéménybe. Értékek: "teto", "tegla_kemeny", "gyujtokemeny", "nem_tudom".
 4. rcd — "Van a lakásban életvédelmi (Fi-)relé? Ez egy biztonsági kapcsoló a biztosítékszekrényben (általában 'TESZT' gombbal), ami áramütés ellen véd." Értékek: "van", "nincs", "nem_tudom".
+5. budget — "Nagyjából milyen összeget szánna a beruházásra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben — a választógombokat a rendszer megjeleníti alattuk. A sávok (csak a te tudásodra): 1 millió Ft alatt → b_1m; 1–1,5 millió Ft → b_1_1_5; 1,5–2 millió Ft → b_1_5_2; 2 millió Ft felett → b_2m; "Még nem tudom" → b_unsure. Ha az ügyfél konkrét számot mond, sorold be a megfelelő sávba.
+6. timeline — "Mikorra szeretné a kivitelezést?" RÖVIDEN kérdezz, a gombokat a rendszer megjeleníti. Lehetőségek (csak a te tudásodra): Amint lehet → t_asap; Egy hónapon belül → t_month; Fél éven belül → t_halfyear; Még idén → t_thisyear; "Még nem tudom" → t_unsure. Az ügyfél szabad szöveggel is válaszolhat — sorold be a legközelebbi lehetőségre.
 
-ELÉRHETŐSÉGEK — most az árajánlat elküldéséhez és a visszahíváshoz kérsz pár adatot. Az 5. kérdés ELŐTT írj egy rövid átvezető mondatot, pl.: "Köszönöm! Hogy elküldhessük a személyre szabott árajánlatot és felvehessük Önnel a kapcsolatot, kérek pár adatot." Utána KÜLÖN-KÜLÖN, egyesével kérdezd (az 5–8. szabad szöveg, ezeknél NINCS gomb), és minden kérdésnél mondd meg RÖVIDEN, miért kéred:
-5. name — "Kérem a nevét — kinek címezzük az árajánlatot?"
-6. email — "Mi az e-mail címe? Erre küldjük el az árajánlatot."
-7. phone — "Mi a telefonszáma? Ezen a számon hívjuk vissza a részletekkel."
-8. postal_code — "Mi az irányítószáma? Ez alapján tudjuk a kiszállást/felmérést egyeztetni."
-9. budget — "Nagyjából milyen összeget szánna a beruházásra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben — a választógombokat a rendszer megjeleníti alattuk. A sávok (csak a te tudásodra): 1 millió Ft alatt → b_1m; 1–1,5 millió Ft → b_1_1_5; 1,5–2 millió Ft → b_1_5_2; 2 millió Ft felett → b_2m; "Még nem tudom" → b_unsure. Ha az ügyfél konkrét számot mond, sorold be a megfelelő sávba.
-10. timeline — "Mikorra szeretné a kivitelezést?" RÖVIDEN kérdezz, a gombokat a rendszer megjeleníti. Lehetőségek (csak a te tudásodra): Amint lehet → t_asap; Egy hónapon belül → t_month; Fél éven belül → t_halfyear; Még idén → t_thisyear; "Még nem tudom" → t_unsure. Az ügyfél szabad szöveggel is válaszolhat — sorold be a legközelebbi lehetőségre.
+ELÉRHETŐSÉGEK — CSAK a 6. kérdés UTÁN, a projektkérdések végén kérd el ezeket, az árajánlat elküldéséhez és a visszahíváshoz. A 7. kérdés ELŐTT írj egy rövid átvezető mondatot, pl.: "Köszönöm! Hogy elküldhessük a személyre szabott árajánlatot és felvehessük Önnel a kapcsolatot, kérek még pár adatot." Utána KÜLÖN-KÜLÖN, egyesével kérdezd (a 7–10. szabad szöveg, ezeknél NINCS gomb), és minden kérdésnél mondd meg RÖVIDEN, miért kéred:
+7. name — "Kérem a nevét — kinek címezzük az árajánlatot?"
+8. email — "Mi az e-mail címe? Erre küldjük el az árajánlatot."
+9. phone — "Mi a telefonszáma? Ezen a számon hívjuk vissza a részletekkel."
+10. postal_code — "Mi az irányítószáma? Ez alapján tudjuk a kiszállást/felmérést egyeztetni."
 
 MEGJEGYZÉS: A vizes rendszerre kötést, a gyári üzembe helyezést és a régi kazán/kémény bontását NE kérdezd meg — ezek minden ajánlatban benne vannak, a rendszer automatikusan hozzáadja.
 
@@ -545,10 +551,11 @@ export default async function handler(request, response) {
         // actually gave.
         const sel = mergeState(currentSel, baseSel, determined);
 
-        // Progress for the widget's progress bar: how many of the questions are
-        // answered out of the total.
-        const progressTotal = FIELD_ORDER.length;
-        const progress = FIELD_ORDER.filter(
+        // Progress for the widget's progress bar: how many of the PROJECT
+        // questions are answered (contact details are not counted, so the bar
+        // reaches 100% just before we ask for them).
+        const progressTotal = PROGRESS_FIELDS.length;
+        const progress = PROGRESS_FIELDS.filter(
             (f) => sel[f] != null && String(sel[f]).trim() !== ""
         ).length;
 
