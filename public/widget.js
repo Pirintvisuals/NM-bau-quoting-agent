@@ -16,6 +16,7 @@
   let started = false;
   let lastLead = null; // { sel, quote } — held so the customer can request the e-mail
   let thinkingEl = null;
+  let progressFillEl = null, progressLabelEl = null, progressBarEl = null;
 
   let container = null;
 
@@ -169,6 +170,16 @@
     header.appendChild(textBlock);
     header.appendChild(actions);
 
+    // ---- Progress bar (how far through the questions) ----
+    const progress = document.createElement("div");
+    progress.className = "faq-progress";
+    progress.innerHTML =
+      '<div class="faq-progress-track"><div class="faq-progress-fill"></div></div>' +
+      '<span class="faq-progress-label"></span>';
+    progressBarEl = progress;
+    progressFillEl = progress.querySelector(".faq-progress-fill");
+    progressLabelEl = progress.querySelector(".faq-progress-label");
+
     // ---- Messages ----
     messagesContainer = document.createElement("div");
     messagesContainer.className = "faq-chat-messages";
@@ -197,6 +208,7 @@
     inputBar.appendChild(sendBtn);
 
     chatWindow.appendChild(header);
+    chatWindow.appendChild(progress);
     chatWindow.appendChild(messagesContainer);
     chatWindow.appendChild(inputBar);
 
@@ -343,6 +355,18 @@
     if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
   }
 
+  // Update the progress bar from the backend's answered/total counts.
+  function updateProgress(done, total) {
+    if (!progressFillEl || !total) return;
+    const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+    progressFillEl.style.width = pct + "%";
+    if (progressLabelEl) progressLabelEl.textContent = done + " / " + total;
+    if (progressBarEl) {
+      progressBarEl.classList.add("visible");
+      progressBarEl.classList.toggle("complete", done >= total);
+    }
+  }
+
   // text: message to send. hidden: don't show as a user bubble (the kickoff).
   async function sendMessage(presetText, hidden) {
     if (sending) return;
@@ -374,6 +398,9 @@
 
       const data = await res.json();
       if (data.state && typeof data.state === "object") convState = data.state;
+      if (typeof data.progress === "number" && typeof data.progressTotal === "number") {
+        updateProgress(data.progress, data.progressTotal);
+      }
       const botResponse = data.answer || "Elnézést, nem találtam választ.";
       // A response may contain [[SPLIT]] markers → render as separate bubbles
       // for readability (e.g. the final quote: price / note / recap).

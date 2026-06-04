@@ -13,29 +13,33 @@
 //  Source: the company's price sheet (milan.xlsx). Prices shown "as-is".
 // ---------------------------------------------------------------------------
 const PRICES = {
-    // Jelenlegi kazán (csak csere esetén számít)
+    // Jelenlegi kazán. "nem_tudom" => the cheapest assumption (0 Ft).
     current_boiler: {
         nyilt:        { huf: 60000,  label: "Jelenlegi kazán: nyílt égésterű" },
         kondenzacios: { huf: 0,      label: "Jelenlegi kazán: kondenzációs" },
         turbos:       { huf: 60000,  label: "Jelenlegi kazán: turbós" },
         nincs:        { huf: 0,      label: "Jelenlegi kazán: nincs (új kiépítés)" },
+        nem_tudom:    { huf: 0,      label: "Jelenlegi kazán: a felmérésnél pontosítjuk" },
     },
-    // Új kazán típusa
+    // Új kazán típusa. "nem_tudom" => the cheapest assumption (kombi).
     new_boiler: {
         kombi_24:   { huf: 450000, label: "Kombi átfolyós gázkészülék, 24 kW" },
         tarolos_46: { huf: 900000, label: "Tárolós gázkészülék 46 literes beépített tárolóval, 24 kW" },
         kulso_125:  { huf: 900000, label: "Külső tárolós 125 literes, 24 kW-os fűtő kazánnal" },
+        nem_tudom:  { huf: 450000, label: "Kombi gázkészülék, 24 kW (alap — a felmérésnél pontosítjuk)" },
     },
-    // Kémény / égéstermék-elvezetés
+    // Kémény / égéstermék-elvezetés. "nem_tudom" => the cheapest (tetőn át).
     flue: {
         teto:         { huf: 380000, label: "Kéménykivezetés a tetőn keresztül (kazántól indulva)" },
         tegla_kemeny: { huf: 600000, label: "Bekötés épített tégla kéménybe" },
         gyujtokemeny: { huf: 600000, label: "Társasházi gyűjtőkémény bekötés" },
+        nem_tudom:    { huf: 380000, label: "Kéménykivezetés a tetőn keresztül (alap — a felmérésnél pontosítjuk)" },
     },
-    // Életvédelmi (Fi) relé
+    // Életvédelmi (Fi) relé. "nem_tudom" => the cheapest (van, 50 000).
     rcd: {
-        van:   { huf: 50000,  label: "Életvédelmi (Fi) relé: van" },
-        nincs: { huf: 100000, label: "Életvédelmi (Fi) relé: nincs — kiépítés szükséges" },
+        van:       { huf: 50000,  label: "Életvédelmi (Fi) relé: van" },
+        nincs:     { huf: 100000, label: "Életvédelmi (Fi) relé: nincs — kiépítés szükséges" },
+        nem_tudom: { huf: 50000,  label: "Életvédelmi (Fi) relé (alap — a felmérésnél pontosítjuk)" },
     },
     // Mindig felszámolt standard tételek
     standard: {
@@ -71,20 +75,20 @@ function buildQuote(sel) {
     const items = [];
     const add = (entry) => { if (entry) items.push({ label: entry.label, huf: entry.huf }); };
 
-    const isReplacement = sel.install_type === "csere";
+    // The new-vs-replacement question was removed; we always quote the full
+    // job (current boiler handling + demolition included). "nem_tudom" answers
+    // fall back to the cheapest variant of each field.
+    const isReplacement = true;
 
-    // Current boiler only counts on a replacement
-    if (isReplacement) add(PRICES.current_boiler[sel.current_boiler] || PRICES.current_boiler.nyilt);
-
-    add(PRICES.new_boiler[sel.new_boiler]);
-    add(PRICES.flue[sel.flue]);
-    add(PRICES.rcd[sel.rcd]);
+    add(PRICES.current_boiler[sel.current_boiler] || PRICES.current_boiler.nem_tudom);
+    add(PRICES.new_boiler[sel.new_boiler] || PRICES.new_boiler.nem_tudom);
+    add(PRICES.flue[sel.flue] || PRICES.flue.nem_tudom);
+    add(PRICES.rcd[sel.rcd] || PRICES.rcd.nem_tudom);
 
     // Standard costs — always included (not asked).
     add(PRICES.standard.wet_system);
     add(PRICES.standard.commissioning);
-    // Demolition of the OLD boiler/chimney only makes sense on a replacement.
-    if (isReplacement) add(PRICES.demolition);
+    add(PRICES.demolition);
 
     const total = items.reduce((s, i) => s + i.huf, 0);
     return { items, total, isReplacement };
@@ -95,39 +99,35 @@ function isQuoteReady(s) {
     if (!s || typeof s !== "object") return false;
     const filled = (k) => s[k] != null && String(s[k]).trim() !== "";
     const required = [
-        "install_type", "new_boiler", "flue", "rcd",
-        "name", "email", "phone", "postal_code", "budget",
+        "current_boiler", "new_boiler", "flue", "rcd",
+        "name", "email", "phone", "postal_code", "budget", "timeline",
     ];
-    if (!required.every(filled)) return false;
-    // current_boiler is only required on a replacement
-    if (String(s.install_type).toLowerCase() === "csere" && !filled("current_boiler")) return false;
-    return true;
+    return required.every(filled);
 }
 
 // Quick-reply buttons for each choice question — decided by the BACKEND from the
 // current state, so the right buttons always appear (not reliant on the model).
 const CHIP_MAP = {
-    install_type: ["Csere", "Új beépítés"],
-    current_boiler: ["Nyílt égésterű", "Kondenzációs", "Turbós"],
-    new_boiler: ["Kombi (24 kW)", "Tárolós (46 l)", "Külső tároló (125 l)"],
-    flue: ["Tetőn keresztül", "Tégla kéménybe", "Társasházi gyűjtőkémény"],
-    rcd: ["Van", "Nincs"],
+    current_boiler: ["Nyílt égésterű", "Kondenzációs", "Turbós", "Nem tudom"],
+    new_boiler: ["Kombi (24 kW)", "Tárolós (46 l)", "Külső tároló (125 l)", "Nem tudom"],
+    flue: ["Tetőn keresztül", "Tégla kéménybe", "Társasházi gyűjtőkémény", "Nem tudom"],
+    rcd: ["Van", "Nincs", "Nem tudom"],
     budget: ["1 millió Ft alatt", "1–1,5 millió Ft", "1,5–2 millió Ft", "2 millió Ft felett", "Még nem tudom"],
+    timeline: ["Amint lehet", "Egy hónapon belül", "Fél éven belül", "Még idén", "Még nem tudom"],
 };
 
-// Order the questions are asked in (current_boiler only on a replacement).
-const FIELD_ORDER = ["install_type", "current_boiler", "new_boiler", "flue", "rcd",
-    "name", "email", "phone", "postal_code", "budget"];
+// Order the questions are asked in.
+const FIELD_ORDER = ["current_boiler", "new_boiler", "flue", "rcd",
+    "name", "email", "phone", "postal_code", "budget", "timeline"];
 
 // Maps a clicked chip label -> its canonical value, per field. Lets the BACKEND
 // record an answer the instant it arrives, without waiting for the model's
 // (one-step-behind) state block. Keys are the exact CHIP_MAP labels.
 const CHIP_VALUES = {
-    install_type: { "csere": "csere", "új beépítés": "uj" },
-    current_boiler: { "nyílt égésterű": "nyilt", "kondenzációs": "kondenzacios", "turbós": "turbos" },
-    new_boiler: { "kombi (24 kw)": "kombi_24", "tárolós (46 l)": "tarolos_46", "külső tároló (125 l)": "kulso_125" },
-    flue: { "tetőn keresztül": "teto", "tégla kéménybe": "tegla_kemeny", "társasházi gyűjtőkémény": "gyujtokemeny" },
-    rcd: { "van": "van", "nincs": "nincs" },
+    current_boiler: { "nyílt égésterű": "nyilt", "kondenzációs": "kondenzacios", "turbós": "turbos", "nem tudom": "nem_tudom" },
+    new_boiler: { "kombi (24 kw)": "kombi_24", "tárolós (46 l)": "tarolos_46", "külső tároló (125 l)": "kulso_125", "nem tudom": "nem_tudom" },
+    flue: { "tetőn keresztül": "teto", "tégla kéménybe": "tegla_kemeny", "társasházi gyűjtőkémény": "gyujtokemeny", "nem tudom": "nem_tudom" },
+    rcd: { "van": "van", "nincs": "nincs", "nem tudom": "nem_tudom" },
     budget: {
         "1 millió ft alatt": "b_1m",
         "1–1,5 millió ft": "b_1_1_5",
@@ -135,15 +135,20 @@ const CHIP_VALUES = {
         "2 millió ft felett": "b_2m",
         "még nem tudom": "b_unsure",
     },
+    timeline: {
+        "amint lehet": "t_asap",
+        "egy hónapon belül": "t_month",
+        "fél éven belül": "t_halfyear",
+        "még idén": "t_thisyear",
+        "még nem tudom": "t_unsure",
+    },
 };
 
 // The first still-unanswered field given the current state (= the question the
 // customer is being asked right now). Returns null when everything is filled.
 function pendingField(sel) {
     const filled = (k) => sel && sel[k] != null && String(sel[k]).trim() !== "";
-    const isCsere = String((sel && sel.install_type) || "").toLowerCase() === "csere";
     for (const f of FIELD_ORDER) {
-        if (f === "current_boiler" && !isCsere) continue;
         if (!filled(f)) return f;
     }
     return null;
@@ -243,17 +248,23 @@ function nextChips(sel) {
 
 // Human-readable Hungarian labels for the recap of what the customer chose.
 const LABELS = {
-    install_type: { csere: "Régi kazán cseréje", uj: "Új beépítés" },
-    current_boiler: { nyilt: "Nyílt égésterű", kondenzacios: "Kondenzációs", turbos: "Turbós", nincs: "—" },
-    new_boiler: { kombi_24: "Kombi (24 kW)", tarolos_46: "Tárolós, 46 l (24 kW)", kulso_125: "Külső tároló, 125 l (24 kW)" },
-    flue: { teto: "Tetőn keresztül", tegla_kemeny: "Tégla kéménybe", gyujtokemeny: "Társasházi gyűjtőkémény" },
-    rcd: { van: "Van", nincs: "Nincs" },
+    current_boiler: { nyilt: "Nyílt égésterű", kondenzacios: "Kondenzációs", turbos: "Turbós", nincs: "—", nem_tudom: "Nem tudja (felmérésnél pontosítjuk)" },
+    new_boiler: { kombi_24: "Kombi (24 kW)", tarolos_46: "Tárolós, 46 l (24 kW)", kulso_125: "Külső tároló, 125 l (24 kW)", nem_tudom: "Nem tudja (alap: kombi)" },
+    flue: { teto: "Tetőn keresztül", tegla_kemeny: "Tégla kéménybe", gyujtokemeny: "Társasházi gyűjtőkémény", nem_tudom: "Nem tudja (alap: tetőn át)" },
+    rcd: { van: "Van", nincs: "Nincs", nem_tudom: "Nem tudja (felmérésnél pontosítjuk)" },
     budget: {
         b_1m: "1 millió Ft alatt",
         b_1_1_5: "1–1,5 millió Ft",
         b_1_5_2: "1,5–2 millió Ft",
         b_2m: "2 millió Ft felett",
         b_unsure: "Még nem tudom",
+    },
+    timeline: {
+        t_asap: "Amint lehet",
+        t_month: "Egy hónapon belül",
+        t_halfyear: "Fél éven belül",
+        t_thisyear: "Még idén",
+        t_unsure: "Még nem tudja",
     },
 };
 const lbl = (group, key) => (LABELS[group] && LABELS[group][key]) || key || "—";
@@ -294,8 +305,7 @@ function renderCustomerQuote(quote, sel) {
 
     // Bubble 3 — recap of everything the customer said
     const recapLines = [`**Az Ön válaszai:**`];
-    recapLines.push(`• Munka: ${lbl("install_type", sel.install_type)}`);
-    if (sel.install_type === "csere") recapLines.push(`• Jelenlegi kazán: ${lbl("current_boiler", sel.current_boiler)}`);
+    recapLines.push(`• Jelenlegi kazán: ${lbl("current_boiler", sel.current_boiler)}`);
     recapLines.push(`• Új kazán: ${lbl("new_boiler", sel.new_boiler)}`);
     recapLines.push(`• Kémény: ${lbl("flue", sel.flue)}`);
     recapLines.push(`• Életvédelmi (Fi) relé: ${lbl("rcd", sel.rcd)}`);
@@ -304,6 +314,7 @@ function renderCustomerQuote(quote, sel) {
     recapLines.push(`• Telefon: ${sel.phone || "—"}`);
     recapLines.push(`• Irányítószám: ${sel.postal_code || "—"}`);
     recapLines.push(`• Tervezett keret: ${lbl("budget", sel.budget)}`);
+    recapLines.push(`• Tervezett kivitelezés: ${lbl("timeline", sel.timeline)}`);
     recapLines.push(``);
     recapLines.push(`Az adatait továbbítottuk a Kazán Kecskeméthez — hamarosan keressük! 📞 +36 30 260 57 56`);
     if (EMAIL_OFFER_ENABLED) {
@@ -331,19 +342,21 @@ Végigvezeted az ügyfelet az alábbi kérdéseken, majd elkéred az elérhetős
 KÖZÉRTHETŐSÉG (nagyon fontos!)
 Az ügyfél laikus, nem szakember. Minden kérdést EGYSZERŰEN, hétköznapi nyelven tegyél fel, és a szakszavakat MINDIG magyarázd el egy rövid, zárójeles mondattal. Ha az ügyfél nem ért valamit vagy azt írja "nem tudom" / "ez mit jelent", magyarázd el türelmesen, hétköznapi példával, és kérd, hogy a legjobb tudása szerint válaszoljon.
 
-KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!):
-1. install_type — "Új kazán beépítéséről, vagy egy régi kazán cseréjéről van szó?" Értékek: "csere" vagy "uj".
-2. current_boiler — CSAK ha "csere": "Milyen kazánja van most?" Röviden segíts: nyílt égésterű (a régi, a helyiség levegőjét égeti), turbós (ventilátorral kifújja a falon át), kondenzációs (modern, hatékony). Értékek: "nyilt", "kondenzacios", "turbos". Ha "uj", hagyd ki és állítsd "nincs"-re.
-3. new_boiler — "Milyen új kazánt szeretne?" Segíts a választásban: kombi (24 kW) — azonnal melegíti a vizet, kis helyigény; tárolós beépített 46 literes tartállyal (24 kW) — több melegvíz egyszerre; külső 125 literes tárolóval (24 kW) — a legtöbb melegvíz, nagy családnak. Értékek: "kombi_24", "tarolos_46", "kulso_125".
-4. flue — "Hogyan távozik a kazán füstgáza?" Magyarázd: a tetőn keresztül kivezetve; meglévő, épített tégla kéménybe; vagy társasházi közös (gyűjtő-) kéménybe. Értékek: "teto", "tegla_kemeny", "gyujtokemeny".
-5. rcd — "Van a lakásban életvédelmi (Fi-)relé? Ez egy biztonsági kapcsoló a biztosítékszekrényben (általában 'TESZT' gombbal), ami áramütés ellen véd." Ha nem tudja, kérd, nézze meg a biztosítékszekrényt; ha így sem tudja, állítsd "nincs"-re (biztonságból a kiépítéssel számolunk, a felmérés pontosítja). Értékek: "van" vagy "nincs".
+FONTOS — "NEM TUDOM": minden választós kérdésnél van "Nem tudom" lehetőség is. Ha az ügyfél nem tudja vagy bizonytalan, fogadd el a "nem_tudom" értéket és lépj tovább — a rendszer ilyenkor a legkedvezőbb (legolcsóbb) feltételezéssel számol, a felmérés pedig pontosít. NE erőltesd a választ.
 
-ELÉRHETŐSÉGEK — KÜLÖN-KÜLÖN kérdezd, egyesével (a 6–9. szabad szöveg, ezeknél NINCS gomb):
-6. name — "Mi a neve?"
-7. email — "Mi az e-mail címe?"
-8. phone — "Mi a telefonszáma?"
-9. postal_code — "Mi az irányítószáma?"
-10. budget — "Nagyjából milyen összeget szánna a beruházásra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben — a választógombokat a rendszer megjeleníti alattuk. A sávok (csak a te tudásodra): 1 millió Ft alatt → b_1m; 1–1,5 millió Ft → b_1_1_5; 1,5–2 millió Ft → b_1_5_2; 2 millió Ft felett → b_2m; "Még nem tudom" → b_unsure. Ha az ügyfél konkrét számot mond, sorold be a megfelelő sávba. NE fogadj el értelmetlen választ — ha nem egyértelmű, kérdezz vissza röviden.
+KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!):
+1. current_boiler — "Milyen kazánja van most (vagy mit cserélne)?" Röviden segíts: nyílt égésterű (a régi, a helyiség levegőjét égeti), turbós (ventilátorral kifújja a falon át), kondenzációs (modern, hatékony). Értékek: "nyilt", "kondenzacios", "turbos", "nem_tudom".
+2. new_boiler — "Milyen új kazánt szeretne?" Segíts a választásban: kombi (24 kW) — azonnal melegíti a vizet, kis helyigény; tárolós beépített 46 literes tartállyal (24 kW) — több melegvíz egyszerre; külső 125 literes tárolóval (24 kW) — a legtöbb melegvíz, nagy családnak. Értékek: "kombi_24", "tarolos_46", "kulso_125", "nem_tudom".
+3. flue — "Hogyan távozik a kazán füstgáza?" Magyarázd: a tetőn keresztül kivezetve; meglévő, épített tégla kéménybe; vagy társasházi közös (gyűjtő-) kéménybe. Értékek: "teto", "tegla_kemeny", "gyujtokemeny", "nem_tudom".
+4. rcd — "Van a lakásban életvédelmi (Fi-)relé? Ez egy biztonsági kapcsoló a biztosítékszekrényben (általában 'TESZT' gombbal), ami áramütés ellen véd." Értékek: "van", "nincs", "nem_tudom".
+
+ELÉRHETŐSÉGEK — most az árajánlat elküldéséhez és a visszahíváshoz kérsz pár adatot. Az 5. kérdés ELŐTT írj egy rövid átvezető mondatot, pl.: "Köszönöm! Hogy elküldhessük a személyre szabott árajánlatot és felvehessük Önnel a kapcsolatot, kérek pár adatot." Utána KÜLÖN-KÜLÖN, egyesével kérdezd (az 5–8. szabad szöveg, ezeknél NINCS gomb), és minden kérdésnél mondd meg RÖVIDEN, miért kéred:
+5. name — "Kérem a nevét — kinek címezzük az árajánlatot?"
+6. email — "Mi az e-mail címe? Erre küldjük el az árajánlatot."
+7. phone — "Mi a telefonszáma? Ezen a számon hívjuk vissza a részletekkel."
+8. postal_code — "Mi az irányítószáma? Ez alapján tudjuk a kiszállást/felmérést egyeztetni."
+9. budget — "Nagyjából milyen összeget szánna a beruházásra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben — a választógombokat a rendszer megjeleníti alattuk. A sávok (csak a te tudásodra): 1 millió Ft alatt → b_1m; 1–1,5 millió Ft → b_1_1_5; 1,5–2 millió Ft → b_1_5_2; 2 millió Ft felett → b_2m; "Még nem tudom" → b_unsure. Ha az ügyfél konkrét számot mond, sorold be a megfelelő sávba.
+10. timeline — "Mikorra szeretné a kivitelezést?" RÖVIDEN kérdezz, a gombokat a rendszer megjeleníti. Lehetőségek (csak a te tudásodra): Amint lehet → t_asap; Egy hónapon belül → t_month; Fél éven belül → t_halfyear; Még idén → t_thisyear; "Még nem tudom" → t_unsure. Az ügyfél szabad szöveggel is válaszolhat — sorold be a legközelebbi lehetőségre.
 
 MEGJEGYZÉS: A vizes rendszerre kötést, a gyári üzembe helyezést és a régi kazán/kémény bontását NE kérdezd meg — ezek minden ajánlatban benne vannak, a rendszer automatikusan hozzáadja.
 
@@ -354,8 +367,8 @@ SZABÁLYOK
 
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett mezők értéke üres string (""). SOSE találgass — csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
-<!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs; budget: b_1m|b_1_1_5|b_1_5_2|b_2m|b_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
+<!--DATA:{"current_boiler":"","new_boiler":"","flue":"","rcd":"","name":"","email":"","phone":"","postal_code":"","budget":"","timeline":""}-->
+A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: current_boiler: nyilt|kondenzacios|turbos|nem_tudom; new_boiler: kombi_24|tarolos_46|kulso_125|nem_tudom; flue: teto|tegla_kemeny|gyujtokemeny|nem_tudom; rcd: van|nincs|nem_tudom; budget: b_1m|b_1_1_5|b_1_5_2|b_2m|b_unsure; timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") — és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 A választógombokat a rendszer automatikusan megjeleníti — neked nem kell gombokat kiírnod.`;
 
@@ -532,6 +545,13 @@ export default async function handler(request, response) {
         // actually gave.
         const sel = mergeState(currentSel, baseSel, determined);
 
+        // Progress for the widget's progress bar: how many of the questions are
+        // answered out of the total.
+        const progressTotal = FIELD_ORDER.length;
+        const progress = FIELD_ORDER.filter(
+            (f) => sel[f] != null && String(sel[f]).trim() !== ""
+        ).length;
+
         // --- COMPLETION CHECK (backend-decided, model-independent) ---
         if (isQuoteReady(sel)) {
             const quote = buildQuote(sel);
@@ -553,6 +573,8 @@ export default async function handler(request, response) {
                 emailOffer: EMAIL_OFFER_ENABLED,
                 lead: { sel, quote },
                 state: sel,
+                progress: progressTotal,
+                progressTotal,
             });
         }
 
@@ -562,7 +584,7 @@ export default async function handler(request, response) {
         // --- QUICK-REPLY CHIPS (backend-decided, reliable) ---
         const chips = nextChips(sel);
 
-        return response.status(200).json({ answer: aiAnswer, chips, state: sel });
+        return response.status(200).json({ answer: aiAnswer, chips, state: sel, progress, progressTotal });
 
     } catch (error) {
         console.error("Function Crash:", error.message);
@@ -604,6 +626,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <p style="margin:4px 0"><b>E-mail:</b> ${sel.email || "-"}</p>
         <p style="margin:4px 0"><b>Irányítószám:</b> ${sel.postal_code || "-"}</p>
         <p style="margin:4px 0"><b>Tervezett keret:</b> ${lbl("budget", sel.budget)}</p>
+        <p style="margin:4px 0"><b>Tervezett kivitelezés:</b> ${lbl("timeline", sel.timeline)}</p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`;
 
     const heading = toCustomer ? "Az Ön árajánlata — Kazán Kecskemét" : "Új árajánlat — Kazán Kecskemét";

@@ -189,6 +189,46 @@
   flex-shrink: 0;
 }
 
+/* ---- Progress bar (question completion) ---- */
+.faq-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  background: #F8FAFC;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.faq-progress-track {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: #E2E8F0;
+  overflow: hidden;
+}
+
+.faq-progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0369A1 0%, #0EA5E9 100%);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background 0.4s ease;
+}
+
+.faq-progress.complete .faq-progress-fill {
+  background: linear-gradient(90deg, #16A34A 0%, #22C55E 100%);
+}
+
+.faq-progress-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748B;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.faq-progress.complete .faq-progress-label { color: #16A34A; }
+
 .faq-header-text {
   display: flex;
   flex-direction: column;
@@ -235,19 +275,20 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 7px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.15);
+  background: #F3701D; /* website orange */
   color: #fff;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
-  transition: background 0.2s ease;
+  box-shadow: 0 2px 8px rgba(243, 112, 29, 0.35);
+  transition: background 0.2s ease, transform 0.15s ease;
 }
 
 .faq-header-phone svg { color: #ffffff; }
-.faq-header-phone:hover { background: rgba(255, 255, 255, 0.28); }
+.faq-header-phone:hover { background: #d9610f; transform: translateY(-1px); }
 .faq-header-phone:focus-visible,
 .faq-header-close:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
 
