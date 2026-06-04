@@ -105,6 +105,30 @@ const CHIP_MAP = {
     flue: ["Tetőn keresztül", "Tégla kéménybe", "Társasházi gyűjtőkémény"],
     rcd: ["Van", "Nincs"],
 };
+// Parse the hidden running-state block out of any assistant message.
+function extractData(text) {
+    if (typeof text !== "string") return null;
+    const m = text.match(/<!--DATA:(.*?)-->/s);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch (e) { return null; }
+}
+
+// Merge several state objects, keeping the last NON-EMPTY value per field.
+// This makes the state immune to the model blanking a field in a single turn:
+// once "csere" is set, a later empty value can't erase it (a real change to a
+// new non-empty value still overrides).
+function mergeState(...states) {
+    const out = {};
+    for (const s of states) {
+        if (!s || typeof s !== "object") continue;
+        for (const k of Object.keys(s)) {
+            const v = s[k];
+            if (v != null && String(v).trim() !== "") out[k] = v;
+        }
+    }
+    return out;
+}
+
 function nextChips(sel) {
     if (!sel || typeof sel !== "object") return CHIP_MAP.install_type;
     const filled = (k) => sel[k] != null && String(sel[k]).trim() !== "";
@@ -329,14 +353,24 @@ export default async function handler(request, response) {
             return response.status(200).json({ answer: "Értem, de ezt nem sikerült feldolgoznom. Megfogalmaznád másképp?" });
         }
 
-        // --- STATE: extract the running DATA block the model maintains ---
-        let sel = null;
+        // --- STATE: extract the running DATA block from THIS message ... ---
+        let currentSel = null;
         const dataMatch = aiAnswer.match(/<!--DATA:(.*?)-->/s);
         if (dataMatch) {
-            try { sel = JSON.parse(dataMatch[1]); }
+            try { currentSel = JSON.parse(dataMatch[1]); }
             catch (e) { console.error("DATA parse fail:", e.message); }
             aiAnswer = aiAnswer.replace(/<!--DATA:.*?-->/s, "").trim();
         }
+
+        // ... then merge it over every earlier DATA block in the conversation so a
+        // single turn that drops a field can't wipe an answer the customer already
+        // gave. Chips + completion are decided from this stable, accumulated state.
+        const priorSel = Array.isArray(history)
+            ? history
+                .filter((m) => m && (m.role === "assistant" || m.role === "model"))
+                .map((m) => extractData(m.content))
+            : [];
+        const sel = mergeState(...priorSel, currentSel);
 
         // --- COMPLETION CHECK (backend-decided, model-independent) ---
         if (isQuoteReady(sel)) {
