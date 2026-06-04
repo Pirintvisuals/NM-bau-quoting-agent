@@ -475,9 +475,13 @@ export default async function handler(request, response) {
             if (v) determined[pending] = v;
         }
 
-        // Final state: base + this answer + whatever the model captured (model
-        // last, so it can fill free-typed answers our mapper couldn't).
-        const sel = mergeState(baseSel, determined, currentSel);
+        // Final state, by ascending trust: the model's own block (currentSel)
+        // is LEAST trusted — it can hallucinate or drop fields — so it only
+        // fills genuine gaps. The accumulated state (baseSel) overrides it, and
+        // this turn's deterministically-mapped answer (determined) wins outright.
+        // This stops a bad model turn from rewriting answers the customer
+        // actually gave.
+        const sel = mergeState(currentSel, baseSel, determined);
 
         // --- COMPLETION CHECK (backend-decided, model-independent) ---
         if (isQuoteReady(sel)) {
