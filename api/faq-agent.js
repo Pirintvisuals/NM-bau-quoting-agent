@@ -149,17 +149,66 @@ function pendingField(sel) {
     return null;
 }
 
+// Parse a free-typed Hungarian budget amount into Ft. Handles e.g.
+// "1 500 000", "1500000", "1,5 millió", "1.5 m", "2 millió", "másfél millió",
+// "900 ezer", "1500 e". Returns null if no plausible amount is found.
+function parseBudgetAmount(text) {
+    if (typeof text !== "string") return null;
+    const t = text.toLowerCase().trim();
+
+    // Word form: "másfél millió" = 1.5 M
+    if (/másf[eé]l\s*milli/.test(t)) return 1_500_000;
+
+    // <number> millió | m | mFt  (comma/dot = decimal separator here)
+    const m = t.match(/(\d+(?:[.,]\d+)?)\s*(?:milli[óo]k?|m\b|mft)/);
+    if (m) {
+        const n = parseFloat(m[1].replace(",", "."));
+        if (!isNaN(n)) return Math.round(n * 1_000_000);
+    }
+
+    // <number> ezer | e | k  = thousands
+    const e = t.match(/(\d+(?:[.,]\d+)?)\s*(?:ezer|e\b|k\b)/);
+    if (e) {
+        const n = parseFloat(e[1].replace(",", "."));
+        if (!isNaN(n)) return Math.round(n * 1000);
+    }
+
+    // Bare number with space/dot/comma thousand separators -> raw Ft.
+    const digits = t.replace(/[^\d]/g, "");
+    if (digits) {
+        const n = parseInt(digits, 10);
+        if (!isNaN(n)) return n;
+    }
+    return null;
+}
+
+// Put a Ft amount into the right budget band. Implausibly small inputs
+// (e.g. "3", "90", "900") return null so they are rejected, not silently
+// bucketed — a real Ft budget is at least five digits.
+function bucketBudget(amount) {
+    if (amount == null || amount < 10000) return null;
+    if (amount < 1_000_000) return "b_1m";
+    if (amount < 1_500_000) return "b_1_1_5";
+    if (amount < 2_000_000) return "b_1_5_2";
+    return "b_2m";
+}
+
 // Given the field the customer is answering + their message, return the canonical
 // value. Choice fields match the clicked chip label (case-insensitive); contact
-// fields take the text as-is. Returns null if it can't be mapped (free-typed
-// choice) so we fall back to the model's captured value.
+// fields take the text as-is. Budget also accepts a typed amount, bucketed into
+// a band. Returns null if it can't be mapped (free-typed choice) so we fall back
+// to the model's captured value.
 function mapAnswer(field, answer) {
     if (typeof answer !== "string" || !answer.trim()) return null;
     const a = answer.trim();
+    if (field === "budget") {
+        // Exact chip label first, otherwise parse a typed amount into a band.
+        return CHIP_VALUES.budget[a.toLowerCase()] || bucketBudget(parseBudgetAmount(a));
+    }
     if (CHIP_VALUES[field]) {
         return CHIP_VALUES[field][a.toLowerCase()] || null;
     }
-    // free-text contact fields (budget is now a chip field, handled above)
+    // free-text contact fields (budget is handled above)
     if (["name", "email", "phone", "postal_code"].includes(field)) return a;
     return null;
 }
