@@ -104,6 +104,7 @@ const CHIP_MAP = {
     new_boiler: ["Kombi (24 kW)", "Tárolós (46 l)", "Külső tároló (125 l)"],
     flue: ["Tetőn keresztül", "Tégla kéménybe", "Társasházi gyűjtőkémény"],
     rcd: ["Van", "Nincs"],
+    budget: ["1 millió Ft alatt", "1–1,5 millió Ft", "1,5–2 millió Ft", "2 millió Ft felett", "Még nem tudom"],
 };
 
 // Order the questions are asked in (current_boiler only on a replacement).
@@ -119,6 +120,13 @@ const CHIP_VALUES = {
     new_boiler: { "kombi (24 kw)": "kombi_24", "tárolós (46 l)": "tarolos_46", "külső tároló (125 l)": "kulso_125" },
     flue: { "tetőn keresztül": "teto", "tégla kéménybe": "tegla_kemeny", "társasházi gyűjtőkémény": "gyujtokemeny" },
     rcd: { "van": "van", "nincs": "nincs" },
+    budget: {
+        "1 millió ft alatt": "b_1m",
+        "1–1,5 millió ft": "b_1_1_5",
+        "1,5–2 millió ft": "b_1_5_2",
+        "2 millió ft felett": "b_2m",
+        "még nem tudom": "b_unsure",
+    },
 };
 
 // The first still-unanswered field given the current state (= the question the
@@ -143,8 +151,8 @@ function mapAnswer(field, answer) {
     if (CHIP_VALUES[field]) {
         return CHIP_VALUES[field][a.toLowerCase()] || null;
     }
-    // contact fields (name, email, phone, postal_code, budget)
-    if (["name", "email", "phone", "postal_code", "budget"].includes(field)) return a;
+    // free-text contact fields (budget is now a chip field, handled above)
+    if (["name", "email", "phone", "postal_code"].includes(field)) return a;
     return null;
 }
 // Parse the hidden running-state block out of any assistant message.
@@ -183,8 +191,28 @@ const LABELS = {
     new_boiler: { kombi_24: "Kombi (24 kW)", tarolos_46: "Tárolós, 46 l (24 kW)", kulso_125: "Külső tároló, 125 l (24 kW)" },
     flue: { teto: "Tetőn keresztül", tegla_kemeny: "Tégla kéménybe", gyujtokemeny: "Társasházi gyűjtőkémény" },
     rcd: { van: "Van", nincs: "Nincs" },
+    budget: {
+        b_1m: "1 millió Ft alatt",
+        b_1_1_5: "1–1,5 millió Ft",
+        b_1_5_2: "1,5–2 millió Ft",
+        b_2m: "2 millió Ft felett",
+        b_unsure: "Még nem tudom",
+    },
 };
 const lbl = (group, key) => (LABELS[group] && LABELS[group][key]) || key || "—";
+
+// Drop any choice-field value the model invents that isn't a known canonical
+// value (e.g. it tries to record budget "90"). Free-text fields are untouched.
+function sanitizeChoices(s) {
+    if (!s || typeof s !== "object") return s;
+    for (const field of Object.keys(LABELS)) {
+        const v = s[field];
+        if (v != null && String(v).trim() !== "" && !(String(v) in LABELS[field])) {
+            delete s[field];
+        }
+    }
+    return s;
+}
 
 // Customer-facing estimate. Returns sections split by [[SPLIT]] so the widget
 // renders them as separate, easy-to-read chat bubbles. Numbers come from buildQuote.
@@ -218,7 +246,7 @@ function renderCustomerQuote(quote, sel) {
     recapLines.push(`• E-mail: ${sel.email || "—"}`);
     recapLines.push(`• Telefon: ${sel.phone || "—"}`);
     recapLines.push(`• Irányítószám: ${sel.postal_code || "—"}`);
-    recapLines.push(`• Tervezett keret: ${sel.budget || "—"}`);
+    recapLines.push(`• Tervezett keret: ${lbl("budget", sel.budget)}`);
     recapLines.push(``);
     recapLines.push(`Az adatait továbbítottuk a Kazán Kecskeméthez — hamarosan keressük! 📞 +36 30 260 57 56`);
     recapLines.push(``);
@@ -251,12 +279,12 @@ KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!):
 4. flue — "Hogyan távozik a kazán füstgáza?" Magyarázd: a tetőn keresztül kivezetve; meglévő, épített tégla kéménybe; vagy társasházi közös (gyűjtő-) kéménybe. Értékek: "teto", "tegla_kemeny", "gyujtokemeny".
 5. rcd — "Van a lakásban életvédelmi (Fi-)relé? Ez egy biztonsági kapcsoló a biztosítékszekrényben (általában 'TESZT' gombbal), ami áramütés ellen véd." Ha nem tudja, kérd, nézze meg a biztosítékszekrényt; ha így sem tudja, állítsd "nincs"-re (biztonságból a kiépítéssel számolunk, a felmérés pontosítja). Értékek: "van" vagy "nincs".
 
-ELÉRHETŐSÉGEK — KÜLÖN-KÜLÖN kérdezd, egyesével (NE egyszerre, NE gombokkal):
+ELÉRHETŐSÉGEK — KÜLÖN-KÜLÖN kérdezd, egyesével (a 6–9. szabad szöveg, ezeknél NINCS gomb):
 6. name — "Mi a neve?"
 7. email — "Mi az e-mail címe?"
 8. phone — "Mi a telefonszáma?"
 9. postal_code — "Mi az irányítószáma?"
-10. budget — "Nagyjából milyen keretet szánna rá?"
+10. budget — "Nagyjából milyen összeget szánna a beruházásra?" Kínáld fel a sávokat: 1 millió Ft alatt; 1–1,5 millió Ft; 1,5–2 millió Ft; 2 millió Ft felett; vagy "Még nem tudom". Értékek: "b_1m", "b_1_1_5", "b_1_5_2", "b_2m", "b_unsure". Ha az ügyfél konkrét számot mond, sorold be a megfelelő sávba. NE fogadj el értelmetlen választ — ha nem egyértelmű, kérdezz vissza a sávokkal.
 
 MEGJEGYZÉS: A vizes rendszerre kötést, a gyári üzembe helyezést és a régi kazán/kémény bontását NE kérdezd meg — ezek minden ajánlatban benne vannak, a rendszer automatikusan hozzáadja.
 
@@ -268,7 +296,7 @@ SZABÁLYOK
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett mezők értéke üres string (""). SOSE találgass — csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
 <!--DATA:{"install_type":"","current_boiler":"","new_boiler":"","flue":"","rcd":"","name":"","email":"","phone":"","postal_code":"","budget":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs. A többi (name, email, phone, postal_code, budget) szabad szöveg.
+A blokkban MINDEN kulcs mindig szerepeljen, csak az értékeket töltsd. Engedélyezett értékek: install_type: csere|uj; current_boiler: nyilt|kondenzacios|turbos|nincs; new_boiler: kombi_24|tarolos_46|kulso_125; flue: teto|tegla_kemeny|gyujtokemeny; rcd: van|nincs; budget: b_1m|b_1_1_5|b_1_5_2|b_2m|b_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") — és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 A választógombokat a rendszer automatikusan megjeleníti — neked nem kell gombokat kiírnod.`;
 
@@ -407,7 +435,7 @@ export default async function handler(request, response) {
         let currentSel = null;
         const dataMatch = aiAnswer.match(/<!--DATA:(.*?)-->/s);
         if (dataMatch) {
-            try { currentSel = JSON.parse(dataMatch[1]); }
+            try { currentSel = sanitizeChoices(JSON.parse(dataMatch[1])); }
             catch (e) { console.error("DATA parse fail:", e.message); }
             aiAnswer = aiAnswer.replace(/<!--DATA:.*?-->/s, "").trim();
         }
@@ -512,7 +540,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <p style="margin:4px 0"><b>Telefon:</b> ${sel.phone || "-"}</p>
         <p style="margin:4px 0"><b>E-mail:</b> ${sel.email || "-"}</p>
         <p style="margin:4px 0"><b>Irányítószám:</b> ${sel.postal_code || "-"}</p>
-        <p style="margin:4px 0"><b>Tervezett keret:</b> ${sel.budget || "-"}</p>
+        <p style="margin:4px 0"><b>Tervezett keret:</b> ${lbl("budget", sel.budget)}</p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`;
 
     const heading = toCustomer ? "Az Ön árajánlata — Kazán Kecskemét" : "Új árajánlat — Kazán Kecskemét";
