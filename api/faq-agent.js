@@ -315,12 +315,28 @@ async function callGemini(messages) {
                 body: JSON.stringify({
                     system_instruction: systemMsg ? { parts: [{ text: systemMsg.content }] } : undefined,
                     contents,
-                    generationConfig: { temperature: 0.4, maxOutputTokens: 500 },
+                    generationConfig: {
+                        temperature: 0.4,
+                        maxOutputTokens: 1000,
+                        // gemini-2.5-flash is a "thinking" model: its internal
+                        // reasoning tokens count against maxOutputTokens and were
+                        // starving the visible answer (messages cut off mid-word).
+                        // This bot follows a fixed script — no reasoning needed —
+                        // so disable thinking. Faster, cheaper, and no truncation.
+                        thinkingConfig: { thinkingBudget: 0 },
+                    },
                 }),
             }
         );
         const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const cand = data.candidates?.[0];
+        // Join every text part (defensive — normally there is just one).
+        const text = (cand?.content?.parts || [])
+            .map(p => p?.text || "")
+            .join("");
+        if (cand?.finishReason === "MAX_TOKENS") {
+            console.warn("Gemini hit MAX_TOKENS — answer may be truncated.");
+        }
         if (text) return { ok: true, text };
         return { ok: false, error: data.error?.message || JSON.stringify(data) };
     } catch (e) {
