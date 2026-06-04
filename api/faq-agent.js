@@ -307,7 +307,7 @@ export default async function handler(request, response) {
     }
 
     try {
-        const { question, history, action, lead } = request.body || {};
+        const { question, history, action, lead, state } = request.body || {};
 
         // --- ACTION: customer asked us to e-mail them the quote ---
         if (action === "email_customer" && lead?.sel && lead?.quote) {
@@ -362,15 +362,18 @@ export default async function handler(request, response) {
             aiAnswer = aiAnswer.replace(/<!--DATA:.*?-->/s, "").trim();
         }
 
-        // ... then merge it over every earlier DATA block in the conversation so a
-        // single turn that drops a field can't wipe an answer the customer already
-        // gave. Chips + completion are decided from this stable, accumulated state.
+        // ... then merge it onto the accumulated state. The widget carries this
+        // state back to us each turn (`state`), because the chat history it stores
+        // has the DATA block stripped out — so a single turn that drops a field
+        // can never wipe an answer the customer already gave. Chips + completion
+        // are decided from this stable, accumulated state, not one model turn.
+        // (history DATA blocks are also merged as a harmless fallback.)
         const priorSel = Array.isArray(history)
             ? history
                 .filter((m) => m && (m.role === "assistant" || m.role === "model"))
                 .map((m) => extractData(m.content))
             : [];
-        const sel = mergeState(...priorSel, currentSel);
+        const sel = mergeState(state, ...priorSel, currentSel);
 
         // --- COMPLETION CHECK (backend-decided, model-independent) ---
         if (isQuoteReady(sel)) {
@@ -392,6 +395,7 @@ export default async function handler(request, response) {
                 chips: [],
                 emailOffer: true,
                 lead: { sel, quote },
+                state: sel,
             });
         }
 
@@ -401,7 +405,7 @@ export default async function handler(request, response) {
         // --- QUICK-REPLY CHIPS (backend-decided, reliable) ---
         const chips = nextChips(sel);
 
-        return response.status(200).json({ answer: aiAnswer, chips });
+        return response.status(200).json({ answer: aiAnswer, chips, state: sel });
 
     } catch (error) {
         console.error("Function Crash:", error.message);

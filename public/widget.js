@@ -12,6 +12,7 @@
   let inputElement = null;
   let sending = false;
   let conversationHistory = []; // [{ role: "user"|"assistant", content: "..." }]
+  let convState = {}; // accumulated answer-state, carried turn-to-turn (chips/quote rely on it)
   let started = false;
   let lastLead = null; // { sel, quote } — held so the customer can request the e-mail
   let thinkingEl = null;
@@ -360,7 +361,7 @@
       const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, history: conversationHistory }),
+        body: JSON.stringify({ question: text, history: conversationHistory, state: convState }),
       });
 
       removeThinking();
@@ -372,6 +373,7 @@
       }
 
       const data = await res.json();
+      if (data.state && typeof data.state === "object") convState = data.state;
       const botResponse = data.answer || "Elnézést, nem találtam választ.";
       // A response may contain [[SPLIT]] markers → render as separate bubbles
       // for readability (e.g. the final quote: price / note / recap).
