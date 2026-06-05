@@ -1,10 +1,10 @@
 (function () {
   // Configuration with defaults for local development
-  const config = window.KAZAN_CONFIG || {};
+  const config = window.NMBAU_CONFIG || window.KAZAN_CONFIG || {};
   const apiUrl = config.apiUrl || "/api/faq-agent";
   const assetsUrl = config.assetsUrl || ""; // e.g. "https://your-app.vercel.app"
   const PHONE = "+36 30 260 57 56";
-  const BRAND = "Kazán Kecskemét";
+  const BRAND = "NM Bau";
 
   let chatOpen = false;
   let chatWindow = null;
@@ -66,7 +66,7 @@
     tooltip.className = "faq-chat-tooltip";
     tooltip.setAttribute("role", "button");
     tooltip.setAttribute("tabindex", "0");
-    tooltip.innerHTML = `<span class="faq-tooltip-text">Üdv! Kérjen pár kattintással ingyenes árajánlatot kazánra.</span>`;
+    tooltip.innerHTML = `<span class="faq-tooltip-text">Üdv! Kérjen pár kattintással ingyenes árajánlatot fürdőszoba-felújításra.</span>`;
 
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
@@ -217,8 +217,8 @@
 
     if (!started) {
       started = true;
-      addMessage("bot", `Üdvözlöm a ${BRAND} árajánló asszisztensénél! Néhány kérdés alapján elkészítem az előzetes árajánlatát.`);
-      sendMessage("Szeretnék árajánlatot kazán beépítésére / cseréjére.", true);
+      addMessage("bot", `Üdvözlöm az ${BRAND} fürdőszoba-felújítás árajánló asszisztensénél! Néhány kérdés alapján elkészítem az előzetes árajánlatát.`);
+      sendMessage("Szeretnék árajánlatot fürdőszoba-felújításra.", true);
     }
   }
 

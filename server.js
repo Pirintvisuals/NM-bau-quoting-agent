@@ -20,7 +20,7 @@ try {
     console.log('No .env file found or error reading it');
 }
 
-const PORT = 8888;
+const PORT = process.env.PORT || 8888;
 
 // MIME types for different file extensions
 const mimeTypes = {

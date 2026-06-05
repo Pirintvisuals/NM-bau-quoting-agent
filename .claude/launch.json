@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "kazan-widget",
+      "name": "nmbau-furdo-widget",
       "runtimeExecutable": "node",
       "runtimeArgs": ["server.js"],
       "port": 8888

@@ -1,92 +1,136 @@
-# Kazán Kecskemét — Árajánló chat widget
+# NM Bau — Fürdőszoba-felújítás árajánló chat widget
 
-A Hungarian gas‑boiler quoting chat widget. The customer answers a short set of
-questions (clicking suggested options **or** typing freely), gives their contact
-details, then immediately sees an itemised estimate. The company owner receives
-the same quote + the customer's details by e‑mail.
+A Hungarian **bathroom‑remodeling** quoting chat widget. The customer answers a
+short set of questions (clicking suggested options **or** typing freely), gives
+their contact details, then immediately sees an itemised **turnkey (kulcsrakész)
+estimate shown as a tight range**. The company owner receives the same quote +
+the customer's details by e‑mail.
+
+It reuses the architecture of the boiler agent (`Kazán Kecskemét`) but with a
+completely new, geometry‑based bathroom pricing engine.
 
 ---
 
 ## How it works (architecture)
 
 ```
-public/widget.js   ──POST──►  api/faq-agent.js  ──►  OpenAI (model via .env)  = conversation only
+public/widget.js   ──POST──►  api/faq-agent.js  ──►  OpenAI / Gemini  = conversation only
    (chat UI)                       │
-                                   ├──►  PRICES table  = deterministic price calc
-                                   └──►  Resend         = e-mail to owner
+                                   ├──►  MODEL table + buildQuote()  = deterministic price calc
+                                   └──►  Resend                      = e-mail to owner
 ```
 
 **The AI never does arithmetic.** It only runs the Hungarian conversation and,
 once every answer is collected, emits a hidden JSON block of the customer's
-*choices* (not prices). The backend looks each choice up in the fixed `PRICES`
-table, sums it, and builds the quote. This is why the total can never be
-miscalculated by the model.
+*choices* (not prices). The backend computes the price deterministically in
+`buildQuote()` from the `MODEL` table, then builds the quote. The total can never
+be miscalculated by the model.
+
+---
+
+## Why a range, and how it stays accurate
+
+A bathroom remodel total genuinely depends on choices that only firm up at the
+site survey, so the widget quotes a **tight ±~10% band** around a point estimate
+(e.g. `2 150 000 – 2 580 000 Ft`) — what an honest contractor gives over the
+phone. The goal: **the most accurate number from the fewest questions.** We ask
+only the inputs that actually move the price:
+
+| # | Question | Field | Why it matters |
+|---|---|---|---|
+| 1 | Bathroom size (m²) | `size` | The single biggest driver. Accepts a typed number or a band. |
+| 2 | Finish/quality tier | `tier` | Basic / mid / premium — swings tiles, fixtures, some labour ~2×. |
+| 3 | Shower vs bath | `washing` | Walk‑in shower / cabin / bath / both — discrete fixture cost. |
+| 4 | Keep or move plumbing | `layout` | Relocating wet points adds significant plumbing work. |
+| 5 | Underfloor heating | `heating` | Discrete electric mat + thermostat add‑on. |
+| 6 | Budget band | `budget` | Lead qualification (does **not** affect the price). |
+| 7 | Timeline | `timeline` | Lead qualification (does **not** affect the price). |
+
+Contact details (`name`, `email`, `phone`, `postal_code`) are asked **last**,
+only after the project is fully described (progress bar at 100%).
+
+Every choice question has a **"Nem tudom"** option → the engine falls back to a
+sensible default (mid tier, 5 m², keep layout, walk‑in shower, no heating) and
+the survey confirms.
 
 ---
 
 ## How the price is calculated
 
-All prices are in **HUF** and are shown **as‑is** (no VAT note, no base/call‑out
-fee). The total is simply the sum of the applicable items below. Source of the
-numbers: the company's price sheet (`milan.xlsx`). Edit them in **one place**:
-the `PRICES` object at the top of [`api/faq-agent.js`](api/faq-agent.js).
+All prices are **HUF, gross (ÁFA included), turnkey** (labour + materials +
+fixtures). The estimate is built bottom‑up into ~8–9 itemised lines, so the
+customer sees exactly what they're paying for:
 
-| Step | Question | Options → amount added |
-|---|---|---|
-| 1 | **Csere vagy új beépítés?** | replacement / new install — controls step 2 & the demolition line |
-| 2 | **Jelenlegi kazán** *(only if replacement)* | nyílt égésterű +60 000 · kondenzációs +0 · turbós +60 000 |
-| 3 | **Új kazán típusa** | kombi 24 kW +450 000 · tárolós 46 L +900 000 · külső 125 L +900 000 |
-| 4 | **Kémény / égéstermék‑elvezetés** | tetőn ki +380 000 · tégla kéménybe +600 000 · társasházi gyűjtőkémény +600 000 |
-| 5 | **Életvédelmi (Fi) relé** | van +50 000 · nincs +100 000 |
-| — | **Always added (not asked)** | vizes rendszerre kötés +300 000 · gyári üzembe helyezés +50 000 |
-| — | **Added on replacement only** | régi kazán/kémény bontása +90 000 (csak `csere` esetén) |
+1. **Bontás, törmelékelszállítás, konténer** — demolition + debris
+2. **Aljzatkiegyenlítés és kétrétegű vízszigetelés** — screed + waterproofing
+3. **Burkolás munkadíja** — tiling labour (floor + walls)
+4. **Csempe és járólap (anyag)** — tile material (+10% waste)
+5. **Gépészet** — plumbing (water + waste, by layout choice)
+6. **Villanyszerelés** — electrical
+7. **Szaniterek és csaptelepek** — fixtures (WC, basin, vanity, taps + shower/bath)
+8. **Festés, glettelés** — painting + skim
+9. **Elektromos padlófűtés** — *(only if chosen)*
 
-**Total = sum of the selected rows + the always‑added standard costs.**
+### Geometry
 
-### Decisions baked into the logic (confirmed by the company)
-- **Prices are GROSS (ÁFA included) and include the boiler appliance + full
-  installation** — the displayed total is what the customer pays
-  (`APPLIANCE_INCLUDED = true`).
-- **Standard costs** (wet‑system +300 000, commissioning +50 000) are **always
-  added and not asked**. **Demolition +90 000** is added the same way but **only
-  on a replacement** (no old boiler to remove on a new install).
-- **Current boiler** only counts on a replacement (a new install → `nincs`, +0).
-- **No gázterv** line — the company confirmed it isn't needed.
-- **Only 24 kW** appliances; exact brand/model is decided at the site survey.
-- **Contact details** collected one field at a time at the end
-  (name → e‑mail → phone → postal code → budget).
+Tiled surface (floor + walls) is estimated from the floor area `A`:
+`wall ≈ 4.3·√A · 2.2 − 2.5` (perimeter × ~2.2 m tiling height, less door/fittings).
+Area‑scaling lines use this; fixed lumps (plumbing, electrical, fixture base,
+demolition setup) provide the fixed‑cost floor that correctly makes **small
+bathrooms cost more per m²**.
 
-### Quote delivery
-- The itemised estimate is **shown in the chat** as soon as all answers are in,
-  split into easy‑to‑read bubbles (price → "just an estimate" note → a recap of
-  everything the customer answered).
-- The **owner always** receives it by e‑mail (with the client's details).
-- The **customer is offered a button** to have the quote e‑mailed to *them* too.
-- Completion is decided by the **backend** (`isQuoteReady`) from a running hidden
-  state block the model maintains — so the quote always appears even if the model
-  phrasing varies. The model never computes the price.
+### Calibration (worked examples)
+
+| Scenario | Estimate (range) |
+|---|---|
+| 4 m², basic, zuhanykabin, keep layout | ~0,9 – 1,1 M Ft |
+| 6 m², mid, walk‑in shower, keep layout | ~1,5 – 1,8 M Ft |
+| 9 m², mid, bath+shower, move plumbing, underfloor heating | ~2,15 – 2,58 M Ft |
+
+These sit inside the published Hungarian ranges (5 m² ≈ 0,75–1,5 M; 10 m² ≈
+1,5–2,5 M).
+
+### Edit the prices in ONE place
+
+The `MODEL` object at the top of [`api/faq-agent.js`](api/faq-agent.js). The band
+width is `MODEL.bandLow` / `MODEL.bandHigh` (default ±8% / +10%).
+
+### Price data sources (2025–2026)
+
+Market aggregators cross‑checked against the **KSH** (Központi Statisztikai
+Hivatal) official construction producer‑price index (**+5.4% YoY in 2025**):
+
+- Komplett kulcsrakész fürdő: ~150 000–250 000 Ft/m² (Daibau, ÉpítésKultúra)
+- Burkolás munkadíj: 8 000–14 000 Ft/m² (JóSzaki, profiburkolas, szakiweb)
+- Vízszigetelés (2 réteg): 5 300–9 900 Ft/m²; aljzat: 1 300–4 400 Ft/m²
+- Festés: 2 300–4 500 Ft/m²; villany előszerelés: 7 500–16 000 Ft/m²
+- Szaniterek (anyag): WC, mosdó, kád, zuhanykabin, csaptelep — tier‑enként összevonva
+
+> The numbers are **market‑calibrated estimates**, not an official price list —
+> Hungary publishes no government bathroom price sheet. KSH grounds the labour
+> inflation; the rest is triangulated from current contractor pricing.
 
 ---
 
 ## Setup & deploy
 
-1. **Keys** — copy your secrets into `.env` (already git‑ignored):
-   - `OPENAI_API_KEY` — from <https://platform.openai.com/api-keys>
-   - `OPENAI_MODEL` — copy the exact model ID from your OpenAI dashboard. The
-     task is tiny, so the cheapest tier is plenty (e.g. `gpt-5.4-nano`, or
-     `gpt-5.4-mini`). The model never affects price accuracy — that's computed
-     in the backend.
+1. **Keys** — in `.env` (git‑ignored):
+   - `AI_PROVIDER` — `gemini` (free tier, good for testing) or `openai`
+   - `GEMINI_API_KEY` / `GEMINI_MODEL` — Google AI Studio
+   - `OPENAI_API_KEY` / `OPENAI_MODEL` — the task is tiny, cheapest tier is plenty
    - `RESEND_API_KEY` — free at <https://resend.com>
    - `LEAD_EMAIL_TO` — where quotes are sent (default `pirint.milan@gmail.com`)
-   - `LEAD_EMAIL_FROM` — leave as the `onboarding@resend.dev` test sender to start;
-     later verify your own domain in Resend and change it.
+   - `LEAD_EMAIL_FROM` — keep `onboarding@resend.dev` to start; later verify your
+     own domain and set e.g. `NM Bau <ajanlat@yourdomain.hu>`
+   - `EMAIL_OFFER=on` — *(optional)* offer to e-mail the quote to the customer too
+     (needs a verified sending domain first)
 2. **Run locally:** `node server.js` → <http://localhost:8888>
-3. **Deploy (Vercel):** push the repo; set the same env vars in the Vercel
-   dashboard. `api/faq-agent.js` is the serverless endpoint, `public/` is static.
+3. **Deploy (Vercel):** push the repo; set the same env vars. `api/faq-agent.js`
+   is the serverless endpoint, `public/` is static.
 4. **Embed on a site:**
    ```html
    <script>
-     window.KAZAN_CONFIG = {
+     window.NMBAU_CONFIG = {
        apiUrl: "https://YOUR-APP.vercel.app/api/faq-agent",
        assetsUrl: "https://YOUR-APP.vercel.app"
      };
@@ -98,8 +142,9 @@ the `PRICES` object at the top of [`api/faq-agent.js`](api/faq-agent.js).
 
 ## Customising
 
-- **Prices:** edit the `PRICES` object in `api/faq-agent.js`.
+- **Prices:** edit the `MODEL` object in `api/faq-agent.js`.
 - **Questions / wording:** edit `SYSTEM_PROMPT` in `api/faq-agent.js`.
-- **Colours / branding:** `public/style.css` (navy `#111827`, gold `#FBBF24`,
-  blue `#025888`). Replace `public/logo.svg` with the company's real logo.
-- **Phone number:** `PHONE` constant in `public/widget.js`.
+- **Brand / phone:** `BRAND` and `PHONE` in `public/widget.js`; `PHONE` falls back
+  to `LEAD_PHONE` in `.env` on the backend.
+- **Colours / branding:** `public/style.css`. Replace `public/logo.png` with NM
+  Bau's real logo.
