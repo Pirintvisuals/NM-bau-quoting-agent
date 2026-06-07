@@ -24,20 +24,25 @@
   // Varied angles (price, speed, specific trades, CTA) so it stays interesting
   // and invites a click. Edit / add freely.
   const TEASERS = [
-    "Mennyibe kerül a fürdőszobám felújítása? 🛁",
-    "Kérjen ingyenes árajánlatot 1 perc alatt! ⏱️",
-    "Pár kérdés, és máris látja a várható árat 👉",
-    "Új fürdőt tervez? Számoljuk ki együtt! 🔧",
-    "Kíváncsi a burkolás és a gépészet árára? 💬",
-    "Kulcsrakész fürdőszoba — kérjen kalkulációt! ✨",
-    "Nem tudja, mi a reális ár? Segítünk! 📊",
-    "Zuhany vagy kád? Mutatjuk az árát is! 🚿",
-    "Ingyenes helyszíni felmérés — kezdje itt! 📍",
-    "Felújítaná a fürdőt? Kérdezzen tőlünk! 🏠",
+    "Mennyibe kerül a fürdőszobám felújítása?",
+    "Kérjen ingyenes árajánlatot 1 perc alatt!",
+    "Pár kérdés, és máris látja a várható árat.",
+    "Új fürdőt tervez? Számoljuk ki együtt!",
+    "Kíváncsi a burkolás és a gépészet árára?",
+    "Kulcsrakész fürdőszoba — kérjen kalkulációt!",
+    "Nem tudja, mi a reális ár? Segítünk!",
+    "Zuhany vagy kád? Mutatjuk az árát is!",
+    "Ingyenes helyszíni felmérés — kezdje itt!",
+    "Felújítaná a fürdőt? Kérdezzen tőlünk!",
   ];
+  const TEASER_ROTATE_MS = 9000; // how long each question stays before swapping
+  const TEASER_DISMISS_KEY = "nmbau_teaser_dismissed";
   let teaserIdx = Math.floor(Math.random() * TEASERS.length); // start varied
   let teaserTimer = null;       // rotation interval
-  let teaserDismissed = false;  // true only after the user closes it with ×
+  // Once the user closes the bubble with ×, it stays gone — remembered across
+  // page loads/visits via localStorage (falls back to in-memory if unavailable).
+  let teaserDismissed = false;
+  try { teaserDismissed = localStorage.getItem(TEASER_DISMISS_KEY) === "1"; } catch (e) {}
 
   // --- Inline SVG icons (no emojis used as UI icons) ---
   const ICON = {
@@ -91,10 +96,11 @@
     closeBtn.type = "button";
     closeBtn.className = "faq-tooltip-close";
     closeBtn.setAttribute("aria-label", "Buborék bezárása");
-    closeBtn.innerHTML = "&times;";
+    closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
     closeBtn.onclick = (e) => {
       e.stopPropagation();
-      teaserDismissed = true; // user explicitly closed it → stay gone this visit
+      teaserDismissed = true; // user explicitly closed it → stay gone for good
+      try { localStorage.setItem(TEASER_DISMISS_KEY, "1"); } catch (err) {}
       hideTeaser();
     };
 
@@ -138,7 +144,7 @@
     // reflow so the entrance transition replays after being hidden
     void tip.offsetWidth;
     tip.classList.add("show");
-    if (!teaserTimer) teaserTimer = setInterval(rotateTeaser, 4500);
+    if (!teaserTimer) teaserTimer = setInterval(rotateTeaser, TEASER_ROTATE_MS);
   }
 
   function hideTeaser() {

@@ -446,7 +446,7 @@ function renderCustomerQuote(quote, sel) {
 
     // Bubble 1 — the price (shown as a range), with a one-line context.
     const priceBubble = [
-        `Köszönöm, ${sel.name || ""}! Íme az **előzetes árajánlata** egy **${sizeLabel(sel.size)}**, **${lbl("tier", sel.tier).toLowerCase()}** fürdőszobára. 🙏`,
+        `Köszönöm, ${sel.name || ""}! Íme az **előzetes árajánlata** egy **${sizeLabel(sel.size)}**, **${lbl("tier", sel.tier).toLowerCase()}** fürdőszobára.`,
         ``,
         `**Tételek:**`,
         items,
@@ -459,7 +459,7 @@ function renderCustomerQuote(quote, sel) {
     // the part that "makes everything make sense": it frames the number, says
     // what it covers, and tells the customer exactly what happens next.
     const nextBubble = [
-        `ℹ️ Ez egy **tájékoztató becslés** — a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott burkolat és szaniterek függvényében.`,
+        `Ez egy **tájékoztató becslés** — a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott burkolat és szaniterek függvényében.`,
         ``,
         `**Mit tartalmaz?** Kulcsrakész ár: bontás, gépészet, villany, vízszigetelés, burkolás, festés, valamint a szaniterek és csaptelepek anyaga és beépítése.`,
         ``,
@@ -476,7 +476,7 @@ function renderCustomerQuote(quote, sel) {
     recap.push(`• Zuhany / kád: **${lbl("washing", sel.washing)}** · Elrendezés: **${lbl("layout", sel.layout)}**`);
     recap.push(`• Padlófűtés: **${lbl("heating", sel.heating)}**`);
     recap.push(``);
-    recap.push(`Sürgős esetben hívjon: 📞 ${PHONE}`);
+    recap.push(`Sürgős esetben hívjon: ${PHONE}`);
     if (EMAIL_OFFER_ENABLED) {
         recap.push(``);
         recap.push(`Szeretné, hogy e-mailben is elküldjük az ajánlatot?`);
@@ -509,6 +509,7 @@ FORMÁZÁS (olvashatóság — NAGYON FONTOS)
 - Tartsd rövidre: a félkövér fő kérdés + legfeljebb 3–4 felsorolás-sor. A kattintható gombokat a rendszer jeleníti meg — neked nem kell gombokat kiírnod.
 - A LÉNYEGES SZAVAKAT mindenhol emeld ki **félkövérrel**: a szám/mértékegység (pl. **7–8 m²**), a kivitelezési szint neve, a "**marad**"/"**áthelyezés**", a "**padlófűtés**", és minden olyan kulcsszó, amin a döntés múlik. Egy soron belül is legyen kiemelve a fontos szó (pl. "Erre küldjük el az **árajánlatot**."). Ne emelj ki egész mondatot — csak a kulcsszót.
 - Amikor visszaigazolod az ügyfél válaszát, az ő válaszát is **félkövérrel** idézd (pl. "Rendben, **közepes** szint.").
+- SOHA ne használj emojit, hangulatjelet vagy ikon-karaktert — kizárólag sima szöveg.
 
 CÉL
 Végigvezeted az ügyfelet az alábbi kérdéseken, majd elkéred az elérhetőségeit. A kérdéseket természetesen, sorban tedd fel. FONTOS: a rendszer már köszöntötte az ügyfelet — NE köszönj újra, rögtön az 1. kérdéssel kezdj.
@@ -641,8 +642,8 @@ export default async function handler(request, response) {
             const ok = await sendQuoteEmail(lead.sel, lead.quote, { to: lead.sel.email, toCustomer: true });
             return response.status(200).json({
                 answer: ok
-                    ? `Elküldtük az árajánlatot a megadott e-mail címre (${lead.sel.email}). 📧 Ha nem találja, nézze meg a Spam mappát is.`
-                    : `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. 📞 ${PHONE}`,
+                    ? `Elküldtük az árajánlatot a megadott e-mail címre (${lead.sel.email}). Ha nem találja, nézze meg a Spam mappát is.`
+                    : `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. ${PHONE}`,
                 chips: [],
             });
         }
@@ -661,7 +662,7 @@ export default async function handler(request, response) {
             if (typeof question === "string" && question.trim()) {
                 if (pend === "email") {
                     const i = emailIssue(question);
-                    if (i === "gmail") reask = "Hoppá, úgy tűnik **elírás** csúszott a címbe — a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét. 🙏";
+                    if (i === "gmail") reask = "Hoppá, úgy tűnik **elírás** csúszott a címbe — a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét.";
                     else if (i) reask = "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).";
                 } else if (pend === "phone") {
                     if (phoneIssue(question)) reask = "Ezt a **telefonszámot** nem sikerült értelmezni. Kérem, adja meg a teljes számát (pl. **+36 20 123 4567** vagy **06 30 123 4567**).";
@@ -828,7 +829,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
           <tr><td style="padding:10px 12px;font-weight:bold">Becsült végösszeg (sáv)</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${formatHuf(quote.low)} – ${formatHuf(quote.high)}</td></tr>
         </table>
         ${toCustomer ? "" : `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af">Fajlagos: ~${formatHuf(quote.perM2)}/m² (kis fürdőnél magasabb a fix költségek miatt — piaci sáv: 150–250e/m² nagy fürdő, kisnél több)</p>`}
-        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció, bruttó (ÁFÁ-val), kulcsrakész. A pontos ár a helyszíni felmérés után, a választott burkolat és szaniterek függvényében véglegesül.${toCustomer ? " 📞 " + PHONE : ""}</p>
+        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció, bruttó (ÁFÁ-val), kulcsrakész. A pontos ár a helyszíni felmérés után, a választott burkolat és szaniterek függvényében véglegesül.${toCustomer ? " " + PHONE : ""}</p>
       </div>
     </div>`;
 
