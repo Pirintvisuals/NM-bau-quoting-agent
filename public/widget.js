@@ -20,6 +20,25 @@
 
   let container = null;
 
+  // Rotating teaser questions shown in the always-on bubble next to the launcher.
+  // Varied angles (price, speed, specific trades, CTA) so it stays interesting
+  // and invites a click. Edit / add freely.
+  const TEASERS = [
+    "Mennyibe kerül a fürdőszobám felújítása? 🛁",
+    "Kérjen ingyenes árajánlatot 1 perc alatt! ⏱️",
+    "Pár kérdés, és máris látja a várható árat 👉",
+    "Új fürdőt tervez? Számoljuk ki együtt! 🔧",
+    "Kíváncsi a burkolás és a gépészet árára? 💬",
+    "Kulcsrakész fürdőszoba — kérjen kalkulációt! ✨",
+    "Nem tudja, mi a reális ár? Segítünk! 📊",
+    "Zuhany vagy kád? Mutatjuk az árát is! 🚿",
+    "Ingyenes helyszíni felmérés — kezdje itt! 📍",
+    "Felújítaná a fürdőt? Kérdezzen tőlünk! 🏠",
+  ];
+  let teaserIdx = Math.floor(Math.random() * TEASERS.length); // start varied
+  let teaserTimer = null;       // rotation interval
+  let teaserDismissed = false;  // true only after the user closes it with ×
+
   // --- Inline SVG icons (no emojis used as UI icons) ---
   const ICON = {
     chat: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
@@ -66,7 +85,7 @@
     tooltip.className = "faq-chat-tooltip";
     tooltip.setAttribute("role", "button");
     tooltip.setAttribute("tabindex", "0");
-    tooltip.innerHTML = `<span class="faq-tooltip-text">Üdv! Kérjen pár kattintással ingyenes árajánlatot fürdőszoba-felújításra.</span>`;
+    tooltip.innerHTML = `<span class="faq-tooltip-text">${TEASERS[teaserIdx]}</span>`;
 
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
@@ -75,25 +94,62 @@
     closeBtn.innerHTML = "&times;";
     closeBtn.onclick = (e) => {
       e.stopPropagation();
-      tooltip.classList.remove("show");
-      setTimeout(() => tooltip.classList.add("hidden"), 300);
+      teaserDismissed = true; // user explicitly closed it → stay gone this visit
+      hideTeaser();
     };
 
     tooltip.appendChild(closeBtn);
     const openFromTooltip = () => {
-      tooltip.classList.remove("show");
-      setTimeout(() => tooltip.classList.add("hidden"), 300);
+      hideTeaser();
       if (!chatOpen) toggleChat();
     };
     tooltip.onclick = openFromTooltip;
     tooltip.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFromTooltip(); } };
 
     container.appendChild(tooltip);
-    setTimeout(() => tooltip.classList.add("show"), 1600);
+    // Show shortly after load, then keep rotating through the varied questions.
+    setTimeout(() => showTeaser(), 1600);
+  }
+
+  function teaserEl() { return document.querySelector(".faq-chat-tooltip"); }
+
+  // Fade the current question out, swap in the next one, give a tiny attention
+  // bounce. Keeps the bubble feeling alive so people notice and click.
+  function rotateTeaser() {
+    const tip = teaserEl();
+    if (!tip || !tip.classList.contains("show")) return;
+    const textEl = tip.querySelector(".faq-tooltip-text");
+    if (!textEl) return;
+    tip.classList.add("swapping");
+    setTimeout(() => {
+      teaserIdx = (teaserIdx + 1) % TEASERS.length;
+      textEl.textContent = TEASERS[teaserIdx];
+      tip.classList.remove("swapping");
+      tip.classList.add("attention");
+      setTimeout(() => tip.classList.remove("attention"), 650);
+    }, 260);
+  }
+
+  function showTeaser() {
+    if (teaserDismissed || chatOpen) return;
+    const tip = teaserEl();
+    if (!tip) return;
+    tip.classList.remove("hidden");
+    // reflow so the entrance transition replays after being hidden
+    void tip.offsetWidth;
+    tip.classList.add("show");
+    if (!teaserTimer) teaserTimer = setInterval(rotateTeaser, 4500);
+  }
+
+  function hideTeaser() {
+    const tip = teaserEl();
+    if (teaserTimer) { clearInterval(teaserTimer); teaserTimer = null; }
+    if (!tip) return;
+    tip.classList.remove("show");
+    setTimeout(() => tip.classList.add("hidden"), 300);
   }
 
   function toggleChat() {
-    const tooltip = document.querySelector(".faq-chat-tooltip");
     const launcher = document.querySelector(".faq-chat-launcher");
 
     if (chatOpen) {
@@ -105,11 +161,10 @@
       }, 180);
       chatOpen = false;
       if (launcher) launcher.classList.remove("active");
+      // Bring the rotating teaser back so the launcher never sits there silent.
+      setTimeout(() => showTeaser(), 400);
     } else {
-      if (tooltip) {
-        tooltip.classList.remove("show");
-        setTimeout(() => tooltip.classList.add("hidden"), 300);
-      }
+      hideTeaser();
       if (!chatWindow) {
         openChat(); // build once (also fires the greeting + first question)
       } else {

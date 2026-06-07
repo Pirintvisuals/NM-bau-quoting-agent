@@ -118,6 +118,17 @@
   transform: rotate(45deg);
 }
 
+/* Rotating teaser text: fade out/in on each swap so it feels alive. */
+.faq-tooltip-text { display: block; transition: opacity 0.25s ease; }
+.faq-chat-tooltip.swapping .faq-tooltip-text { opacity: 0; }
+
+/* Tiny attention bounce when the question changes — draws the eye, invites a tap. */
+@keyframes faqTeaserBounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-5px) scale(1.03); }
+}
+.faq-chat-tooltip.attention { animation: faqTeaserBounce 0.6s ease; }
+
 .faq-tooltip-close {
   position: absolute;
   top: -9px;
@@ -559,7 +570,9 @@
   .faq-chat-window,
   .faq-msg,
   .faq-chips,
-  .faq-chat-tooltip { animation: none; transition: none; }
+  .faq-chat-tooltip,
+  .faq-chat-tooltip.attention,
+  .faq-tooltip-text { animation: none; transition: none; }
   .faq-chat-launcher:hover,
   .faq-chip:hover,
   .faq-send-btn:hover { transform: none; }
