@@ -217,7 +217,7 @@
 
     if (!started) {
       started = true;
-      addMessage("bot", `Üdvözlöm az ${BRAND} fürdőszoba-felújítás árajánló asszisztensénél! Néhány kérdés alapján elkészítem az előzetes árajánlatát.`);
+      addMessage("bot", `Üdvözlöm az **${BRAND}** **fürdőszoba-felújítás** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.`);
       sendMessage("Szeretnék árajánlatot fürdőszoba-felújításra.", true);
     }
   }
@@ -234,7 +234,7 @@
     for (const raw of text.split("\n")) {
       const line = raw.trim();
       if (line === "") { html += '<div class="faq-sp"></div>'; continue; }
-      if (line.startsWith("•")) { html += '<div class="faq-li">' + inline(line) + "</div>"; continue; }
+      if (line.startsWith("•")) { html += '<div class="faq-li">' + inline(line.replace(/^•\s*/, "")) + "</div>"; continue; }
       if (/^\*\*.*\*\*:?$/.test(line)) { html += '<div class="faq-h">' + inline(line) + "</div>"; continue; }
       html += '<div class="faq-p">' + inline(line) + "</div>";
     }

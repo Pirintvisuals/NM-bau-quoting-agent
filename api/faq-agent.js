@@ -18,17 +18,35 @@
 // ---------------------------------------------------------------------------
 //  PRICE MODEL (HUF) — single source of truth. Edit numbers here only.
 //
-//  Sources (2025–2026 Hungarian market, cross-checked against the KSH official
-//  construction producer-price index, +5.4% YoY in 2025):
-//   - Komplett kulcsrakész fürdő: ~150 000–250 000 Ft/m² (Daibau, ÉpítésKultúra)
-//   - Burkolás munkadíj: 8 000–14 000 Ft/m² (JóSzaki, profiburkolas, szakiweb)
-//   - Vízszigetelés (2 réteg): 5 300–9 900 Ft/m² (Daibau)
-//   - Aljzatkiegyenlítés: 1 300–4 400 Ft/m²; bontás (csempe): 1 500–4 500 Ft/m²
-//   - Festés: 2 300–4 500 Ft/m²; villany előszerelés: 7 500–16 000 Ft/m²
-//   - Szaniterek (anyag): WC 10–80e, mosdó 5–100e, kád 30–500e, zuhanykabin
-//     40–500e, csaptelep 10–100e — tier-enként összevonva alább.
-//  These are blended into per-task line items, then calibrated against the
-//  published total ranges by bathroom size (5 m² ~0,75–1,5 M; 10 m² ~1,5–2,5 M).
+//  METHODOLOGY: bottom-up, itemised (tételes) — exactly how a real Hungarian
+//  kulcsrakész árajánlat is built. We deliberately do NOT price as a flat
+//  Ft/m² × area, because the headline "150 000–250 000 Ft/m²" aggregator number
+//  is a large-room simplification: it is wrong for small bathrooms, where fixed
+//  costs (container, plumbing/electrical rough-in, fixtures) dominate and push
+//  the real Ft/m² well above 250 000. The fixed-cost "floor" in each line below
+//  is what correctly makes a 4 m² room cost more per m² than a 9 m² one.
+//
+//  Sources — triangulated across the live 2025–2026 Hungarian market (verified
+//  2026-06; grounded by the KSH építőipari termelői árindex labour inflation):
+//   - Kulcsrakész total: 150 000–250 000 Ft/m² nagyobb fürdőnél, kisnél több
+//     (Daibau: 5 m² ~0,8–1,25 M, 10 m² ~1,5–2,5 M; qjob átlag ~250 000 Ft/m²;
+//      ÉpítésKultúra: alap 1,5–2 M, közepes 2,5–3,5 M).
+//   - Burkolás munkadíj: 3–10 m² szoba 7 000–15 000 Ft/m², 3 m² alatt 9–20 000
+//     (Daibau, qjob, Imprex, Árfürkész, szakiweb).
+//   - Csempe/járólap anyag: középkat. 5 000–10 000, prémium 15 000–25 000,
+//     takarékos 3 000–5 000 Ft/m² (ÉpítésKultúra, qjob).
+//   - Aljzat/esztrich: 5 000–10 000 Ft/m²; kétrétegű kenhető vízszigetelés:
+//     5 300–9 900 Ft/m² (padló + vizes fal) (Daibau).
+//   - Bontás (régi burkolat): 2 100–7 600 Ft/m² + konténer/törmelék; teljes
+//     bontás 30 000–150 000 Ft (Daibau, qjob).
+//   - Gépészet: feladatonként 5 000–45 000 Ft, teljes rough-in jelentős; villany
+//     előszerelés 7 500–16 000 Ft/m², teljes 100–300e (Daibau, qjob).
+//   - Festés/glettelés: 1 700–4 000 Ft/m² (Daibau, qjob).
+//   - Szaniterek (anyag+beépítés): WC 15–80e + ülőke + tartály, mosdó 15–80e,
+//     kád 20–300e, zuhanykabin 90–300e, csaptelep 5–30e — tier-enként összevonva.
+//   - Elektromos fűtőszőnyeg 150 W/m² + termosztát: ~18 000–31 000 Ft/m² beépítve.
+//  Each scenario's output is cross-checked against the published total + Ft/m²
+//  envelopes in test-quote.mjs so future edits can't silently drift off-market.
 // ---------------------------------------------------------------------------
 const MODEL = {
     // Variable, area-scaling labour + consumables (per m² of TILED surface,
@@ -43,13 +61,18 @@ const MODEL = {
     demoPerM2: 3000,
     demoFixed: 70000,
 
-    // Screed levelling + two-layer waterproofing: per m² of FLOOR + fixed wet-zone.
-    prepPerM2: 8000,
-    prepFixed: 30000,
+    // Screed levelling (aljzatkiegyenlítés): over the whole FLOOR, per m².
+    screedPerM2: 6500,
+    // Two-layer brush-on waterproofing (kétrétegű kenhető vízszigetelés): over the
+    // FLOOR *plus* the wet-zone walls behind the shower/bath (not just the floor —
+    // this is the fix for the previously under-priced prep line). Per m².
+    waterproofPerM2: 7000,
+    // Primer, corner/joint sealing tapes, floor drain collar — fixed wet-room setup.
+    prepFixed: 20000,
 
     // Plumbing (water + waste pipes, rough-in, fixture connections), by layout.
-    plumbingKeep: 140000,   // elrendezés marad
-    plumbingMove: 260000,   // áthelyezés / új elrendezés
+    plumbingKeep: 150000,   // elrendezés marad
+    plumbingMove: 280000,   // áthelyezés / új elrendezés
     plumbingBathExtra: 30000,   // +kád külön bekötés
     plumbingBothExtra: 50000,   // +kád ÉS zuhany
 
@@ -117,6 +140,13 @@ function tiledSurface(A) {
     return { floor: A, wall, total: A + wall };
 }
 
+// Wet-zone wall area to waterproof behind the shower/bath (m²). It grows with the
+// room but is bounded — a tiny bathroom still needs a real shower splash zone,
+// a large one doesn't waterproof every wall to the ceiling.
+function wetWallArea(A) {
+    return Math.min(7, Math.max(3, A));
+}
+
 // ---------------------------------------------------------------------------
 //  Build the itemised quote deterministically from the customer's answers.
 //  Returns { items[], total (point estimate), low, high, area }.
@@ -124,7 +154,9 @@ function tiledSurface(A) {
 function buildQuote(sel) {
     const A = areaOf(sel.size);
     const tier = ["basic", "mid", "premium"].includes(sel.tier) ? sel.tier : "mid";
-    const washing = MODEL.washing[sel.washing] ? sel.washing : "zuhany";
+    // When the customer doesn't know, fall back to the CHEAPER option (a
+    // complete shower cabin) so an unknown answer never rounds the quote upward.
+    const washing = MODEL.washing[sel.washing] ? sel.washing : "zuhanykabin";
     const { total: T } = tiledSurface(A);
 
     const items = [];
@@ -133,8 +165,10 @@ function buildQuote(sel) {
     // 1 — Bontás + törmelékelszállítás
     add("Bontás, törmelékelszállítás, konténer", MODEL.demoPerM2 * T + MODEL.demoFixed);
 
-    // 2 — Aljzatkiegyenlítés + kétrétegű vízszigetelés
-    add("Aljzatkiegyenlítés és kétrétegű vízszigetelés", MODEL.prepPerM2 * A + MODEL.prepFixed);
+    // 2 — Aljzatkiegyenlítés + kétrétegű vízszigetelés (padló + vizes falak)
+    const waterproofArea = A + wetWallArea(A);
+    add("Aljzatkiegyenlítés és kétrétegű vízszigetelés",
+        MODEL.screedPerM2 * A + MODEL.waterproofPerM2 * waterproofArea + MODEL.prepFixed);
 
     // 3 — Burkolás munkadíja (fal + padló)
     const tileLabor = MODEL.tileLabor[tier] + (A <= 4 ? MODEL.smallRoomUplift : 0);
@@ -166,7 +200,8 @@ function buildQuote(sel) {
     const total = items.reduce((s, i) => s + i.huf, 0);
     const low = round10000(total * MODEL.bandLow);
     const high = round10000(total * MODEL.bandHigh);
-    return { items, total, low, high, area: A };
+    const perM2 = Math.round(total / A); // implied turnkey Ft/m² (market sanity check)
+    return { items, total, low, high, area: A, perM2 };
 }
 
 // Exported for unit testing the pricing math (no effect in production).
@@ -277,6 +312,30 @@ function bucketBudget(amount) {
     return "b_3m";
 }
 
+// Light e-mail sanity check. Goal: catch the obvious cases — a malformed address
+// and (especially) a MISSPELLED gmail.com — so a bounced lead doesn't slip
+// through. Returns "format" | "gmail" | null (null = looks fine). Deliberately
+// conservative: we only flag clear gmail typos, never reject an unfamiliar but
+// valid domain (e.g. email.com, ymail.com, a company address).
+const GMAIL_TYPOS = new Set([
+    "gmial.com", "gmai.com", "gmal.com", "gmil.com", "gmali.com", "gamil.com",
+    "gmaill.com", "gmaul.com", "gmsil.com", "gmaik.com", "gmqil.com", "gnail.com",
+    "gmile.com", "gmaol.com", " gmail.com", "gmail.con", "gmail.co", "gmail.cm",
+    "gmail.om", "gmail.comm", "gmail.cpm", "gmail.vom", "gmail.xom", "gmail.ocm",
+    "gmail.cim", "gmail.coom", "gmaill.con",
+]);
+function emailIssue(email) {
+    const e = String(email || "").trim().toLowerCase();
+    const m = e.match(/^[^\s@]+@([^\s@]+\.[^\s@]+)$/);
+    if (!m) return "format"; // no @, missing domain, or no dot in the domain
+    const domain = m[1];
+    if (domain === "gmail.com") return null;
+    // Anything written as "gmail.<not com>" is a typo — gmail only uses .com.
+    if (domain.startsWith("gmail.")) return "gmail";
+    if (GMAIL_TYPOS.has(domain)) return "gmail";
+    return null;
+}
+
 // Given the field the customer is answering + their message, return the canonical
 // value. Choice fields match the clicked chip label (case-insensitive). Size also
 // accepts a typed number (stored as the bare number string). Budget also accepts
@@ -329,7 +388,7 @@ function nextChips(sel) {
 // `size` is handled by sizeLabel() since it can also be a free number.
 const LABELS = {
     tier: { basic: "Alap / takarékos", mid: "Közepes", premium: "Prémium", nem_tudom: "Nem tudja (alap: közepes)" },
-    washing: { zuhany: "Beépített zuhanyzó", zuhanykabin: "Zuhanykabin", kad: "Kád", mindketto: "Kád és zuhany", nem_tudom: "Nem tudja (alap: zuhanyzó)" },
+    washing: { zuhany: "Beépített zuhanyzó", zuhanykabin: "Zuhanykabin", kad: "Kád", mindketto: "Kád és zuhany", nem_tudom: "Nem tudja (alap: zuhanykabin)" },
     layout: { marad: "Marad a mostani", athelyez: "Áthelyezés (új elrendezés)", nem_tudom: "Nem tudja (alap: marad)" },
     heating: { igen: "Igen, padlófűtéssel", nem: "Nem", nem_tudom: "Nem tudja (alap: nincs)" },
     budget: { b_1m: "1 millió Ft alatt", b_1_2: "1–2 millió Ft", b_2_3: "2–3 millió Ft", b_3m: "3 millió Ft felett", b_unsure: "Még nem tudom" },
@@ -420,6 +479,18 @@ HANGNEM
 - Egyszerre EGY kérdést tegyél fel. Sose kérdezz több dolgot egyszerre.
 - Sose találgass árat és sose számolj — az árat a rendszer számolja ki a végén, sávban.
 
+FORMÁZÁS (olvashatóság — NAGYON FONTOS)
+Írj jól SZKENNELHETŐEN, Markdown-formázással (a rendszer megjeleníti a **félkövért** és a "•" felsorolást):
+- A fő KÉRDÉST MINDIG külön sorba és **félkövérbe** tedd. Pl.: **Körülbelül hány négyzetméteres a fürdőszoba?**
+- Ha a kérdéshez magyarázandó lehetőségek tartoznak, NE zsúfold zárójelbe egy hosszú mondatba — sorold fel őket, MINDEN sor "• " jellel kezdődjön, a lehetőség neve **félkövér**, utána rövid magyarázat gondolatjellel. Példa a teljes válaszformára:
+**Milyen kivitelezési szintet szeretne?**
+• **Alap / takarékos** – egyszerű, jó ár-érték csempe és szaniter
+• **Közepes** – szép, márkás, középkategóriás anyagok
+• **Prémium** – magas minőségű, dizájn burkolat és szaniter
+- Tartsd rövidre: a félkövér fő kérdés + legfeljebb 3–4 felsorolás-sor. A kattintható gombokat a rendszer jeleníti meg — neked nem kell gombokat kiírnod.
+- A LÉNYEGES SZAVAKAT mindenhol emeld ki **félkövérrel**: a szám/mértékegység (pl. **7–8 m²**), a kivitelezési szint neve, a "**marad**"/"**áthelyezés**", a "**padlófűtés**", és minden olyan kulcsszó, amin a döntés múlik. Egy soron belül is legyen kiemelve a fontos szó (pl. "Erre küldjük el az **árajánlatot**."). Ne emelj ki egész mondatot — csak a kulcsszót.
+- Amikor visszaigazolod az ügyfél válaszát, az ő válaszát is **félkövérrel** idézd (pl. "Rendben, **közepes** szint.").
+
 CÉL
 Végigvezeted az ügyfelet az alábbi kérdéseken, majd elkéred az elérhetőségeit. A kérdéseket természetesen, sorban tedd fel. FONTOS: a rendszer már köszöntötte az ügyfelet — NE köszönj újra, rögtön az 1. kérdéssel kezdj.
 
@@ -429,11 +500,23 @@ Az ügyfél laikus. Minden kérdést EGYSZERŰEN, hétköznapi nyelven tegyél f
 FONTOS — "NEM TUDOM": minden választós kérdésnél van "Nem tudom" lehetőség is. Ha az ügyfél bizonytalan, fogadd el a "nem_tudom" értéket és lépj tovább — a rendszer ilyenkor egy ésszerű alap-feltételezéssel számol, a felmérés pedig pontosít. NE erőltesd a választ.
 
 KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!). ELŐSZÖR az 1–7. projektkérdést tedd fel, és CSAK utána, a végén kérd el az elérhetőségeket (8–11.):
-1. size — "Körülbelül hány négyzetméteres a fürdőszoba?" Ha tudja, mondjon konkrét számot (pl. 6), vagy válasszon sávot. Értékek: "s_3_4", "s_5_6", "s_7_8", "s_9_10", "s_11p", vagy egy szám (pl. "6"), vagy "nem_tudom".
-2. tier — "Milyen kivitelezési szintet szeretne?" Magyarázd: Alap/takarékos — egyszerű, jó ár-érték csempe és szaniter; Közepes — szép, márkás középkategória; Prémium — magas minőségű, dizájn burkolat és szaniter. Értékek: "basic", "mid", "premium", "nem_tudom".
-3. washing — "Zuhanyzót vagy kádat szeretne?" Lehetőségek: beépített (falazott/tálcás) zuhanyzó üveggel; komplett zuhanykabin; fürdőkád; vagy kád ÉS külön zuhany is. Értékek: "zuhany", "zuhanykabin", "kad", "mindketto", "nem_tudom".
-4. layout — "Marad a mostani elrendezés, vagy áthelyeznénk a vizes pontokat (WC, mosdó, zuhany helye)?" Az áthelyezés több gépészeti munkával jár. Értékek: "marad", "athelyez", "nem_tudom".
-5. heating — "Szeretne elektromos padlófűtést a fürdőbe?" (kellemes meleg padló, külön fűtőszőnyeg). Értékek: "igen", "nem", "nem_tudom".
+1. size — **félkövér** fő kérdés: "Körülbelül hány négyzetméteres a fürdőszoba?" + egy rövid sor: mondjon konkrét számot (pl. 6 m²), vagy válasszon a gombok közül. Értékek: "s_3_4", "s_5_6", "s_7_8", "s_9_10", "s_11p", vagy egy szám (pl. "6"), vagy "nem_tudom".
+2. tier — **félkövér** fő kérdés "Milyen kivitelezési szintet szeretne?", ALATTA felsorolás (kötelező ez a forma):
+   • **Alap / takarékos** – egyszerű, jó ár-érték csempe és szaniter
+   • **Közepes** – szép, márkás, középkategóriás anyagok
+   • **Prémium** – magas minőségű, dizájn burkolat és szaniter
+   Értékek: "basic", "mid", "premium", "nem_tudom".
+3. washing — **félkövér** fő kérdés "Zuhanyzót vagy kádat szeretne?", ALATTA felsorolás:
+   • **Beépített zuhanyzó** – falazott/tálcás, üvegfallal
+   • **Zuhanykabin** – kész, komplett kabin
+   • **Kád** – fürdőkád
+   • **Kád és zuhany** – mindkettő, külön
+   Értékek: "zuhany", "zuhanykabin", "kad", "mindketto", "nem_tudom".
+4. layout — **félkövér** fő kérdés "Marad a mostani elrendezés, vagy áthelyeznénk a vizes pontokat?", ALATTA felsorolás:
+   • **Marad** – a WC, mosdó, zuhany a helyén marad
+   • **Áthelyezés** – új elrendezés, több gépészeti munkával
+   Értékek: "marad", "athelyez", "nem_tudom".
+5. heating — **félkövér** fő kérdés "Szeretne elektromos padlófűtést a fürdőbe?" + egy rövid magyarázó sor (kellemes meleg padló, csempe alá fektetett fűtőszőnyeg). Értékek: "igen", "nem", "nem_tudom".
 6. budget — "Nagyjából milyen összeget szánna a felújításra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben — a gombokat a rendszer megjeleníti. Sávok (csak neked): 1 millió alatt → b_1m; 1–2 millió → b_1_2; 2–3 millió → b_2_3; 3 millió felett → b_3m; "Még nem tudom" → b_unsure. Konkrét számot sorolj be a megfelelő sávba.
 7. timeline — "Mikorra szeretné a kivitelezést?" RÖVIDEN kérdezz, a gombokat a rendszer megjeleníti. Lehetőségek (csak neked): Amint lehet → t_asap; Egy hónapon belül → t_month; Fél éven belül → t_halfyear; Még idén → t_thisyear; "Még nem tudom" → t_unsure.
 
@@ -468,7 +551,7 @@ async function callOpenAI(messages) {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
             body: JSON.stringify({
-                model: process.env.OPENAI_MODEL || "gpt-5.4-mini",
+                model: process.env.OPENAI_MODEL || "gpt-4o-mini",
                 messages,
                 temperature: 0.4,
                 max_tokens: 500,
@@ -543,6 +626,31 @@ export default async function handler(request, response) {
                     : `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. 📞 ${PHONE}`,
                 chips: [],
             });
+        }
+
+        // --- EARLY E-MAIL CHECK: if the customer is answering the e-mail field,
+        // catch an obvious typo (esp. a misspelled gmail.com) BEFORE spending a
+        // model call. We keep the field unrecorded so it stays "pending" and the
+        // flow waits for a corrected address. ---
+        {
+            const priorSel = Array.isArray(history)
+                ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => extractData(m.content))
+                : [];
+            const baseSel = mergeState(state, ...priorSel);
+            if (pendingField(baseSel) === "email" && typeof question === "string" && question.trim()) {
+                const issue = emailIssue(question);
+                if (issue) {
+                    return response.status(200).json({
+                        answer: issue === "gmail"
+                            ? "Hoppá, úgy tűnik **elírás** csúszott a címbe — a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét. 🙏"
+                            : "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).",
+                        chips: [],
+                        state: baseSel,
+                        progress: PROGRESS_FIELDS.filter((f) => baseSel[f] != null && String(baseSel[f]).trim() !== "").length,
+                        progressTotal: PROGRESS_FIELDS.length,
+                    });
+                }
+            }
         }
 
         // Normalized message list for the model.
@@ -692,6 +800,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
           <tr><td style="padding:10px 12px;font-weight:bold">Becsült végösszeg (sáv)</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${formatHuf(quote.low)} – ${formatHuf(quote.high)}</td></tr>
         </table>
+        ${toCustomer ? "" : `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af">Fajlagos: ~${formatHuf(quote.perM2)}/m² (kis fürdőnél magasabb a fix költségek miatt — piaci sáv: 150–250e/m² nagy fürdő, kisnél több)</p>`}
         <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció, bruttó (ÁFÁ-val), kulcsrakész. A pontos ár a helyszíni felmérés után, a választott burkolat és szaniterek függvényében véglegesül.${toCustomer ? " 📞 " + PHONE : ""}</p>
       </div>
     </div>`;
