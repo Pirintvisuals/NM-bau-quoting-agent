@@ -58,8 +58,10 @@ const MODEL = {
     tileMaterial: { basic: 4500, mid: 9000, premium: 18000 },
 
     // Demolition + debris removal: per m² of tiled surface + fixed container/strip.
+    // The fixed part (container hire + haulage + mobilisation) is a real floor that
+    // every job carries — set realistically so the smallest jobs aren't under-quoted.
     demoPerM2: 3000,
-    demoFixed: 70000,
+    demoFixed: 90000,
 
     // Screed levelling (aljzatkiegyenlítés): over the whole FLOOR, per m².
     screedPerM2: 6500,
@@ -68,7 +70,7 @@ const MODEL = {
     // this is the fix for the previously under-priced prep line). Per m².
     waterproofPerM2: 7000,
     // Primer, corner/joint sealing tapes, floor drain collar — fixed wet-room setup.
-    prepFixed: 20000,
+    prepFixed: 30000,
 
     // Plumbing (water + waste pipes, rough-in, fixture connections), by layout.
     plumbingKeep: 150000,   // elrendezés marad
@@ -336,6 +338,21 @@ function emailIssue(email) {
     return null;
 }
 
+// Phone sanity check. A Hungarian number has ~9 digits of significant content
+// (mobile: 06 + 20/30/31/50/70 + 7 digits; or +36 …). We just count digits so a
+// too-short fragment like "071701" is caught. Returns "format" | null.
+function phoneIssue(phone) {
+    const d = String(phone || "").replace(/[^\d]/g, "");
+    return d.length >= 9 && d.length <= 13 ? null : "format";
+}
+
+// Postal-code sanity check. Hungarian irányítószám is EXACTLY 4 digits. This also
+// stops a phone number bleeding into the postal field. Returns "format" | null.
+function postalIssue(pc) {
+    const d = String(pc || "").replace(/[^\d]/g, "");
+    return /^\d{4}$/.test(d) ? null : "format";
+}
+
 // Given the field the customer is answering + their message, return the canonical
 // value. Choice fields match the clicked chip label (case-insensitive). Size also
 // accepts a typed number (stored as the bare number string). Budget also accepts
@@ -427,43 +444,45 @@ function sanitizeChoices(s) {
 function renderCustomerQuote(quote, sel) {
     const items = quote.items.map(i => `• ${i.label} — **${formatHuf(i.huf)}**`).join("\n");
 
-    // Bubble 1 — the price (shown as a range)
+    // Bubble 1 — the price (shown as a range), with a one-line context.
     const priceBubble = [
-        `Köszönöm, ${sel.name || ""}! Íme az előzetes árajánlata. 🙏`,
+        `Köszönöm, ${sel.name || ""}! Íme az **előzetes árajánlata** egy **${sizeLabel(sel.size)}**, **${lbl("tier", sel.tier).toLowerCase()}** fürdőszobára. 🙏`,
         ``,
         `**Tételek:**`,
         items,
         ``,
-        `**Becsült végösszeg: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}** (bruttó, ÁFÁ-val, kulcsrakész)`,
+        `**Becsült végösszeg: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}**`,
+        `(bruttó, ÁFÁ-val, **kulcsrakész**)`,
     ].join("\n");
 
-    // Bubble 2 — "just an estimate" note
-    const noteBubble = [
-        `ℹ️ Ez egy **előzetes, tájékoztató becslés** — a végleges ár a helyszíni felmérés után pontosul, a választott burkolat és szaniterek függvényében.`,
-        `Az ár **kulcsrakész**: bontás, gépészet, villany, szigetelés, burkolás, festés, valamint a szaniterek és csaptelepek anyaga és beépítése is benne van.`,
+    // Bubble 2 — what's included + the estimate caveat + the next steps. This is
+    // the part that "makes everything make sense": it frames the number, says
+    // what it covers, and tells the customer exactly what happens next.
+    const nextBubble = [
+        `ℹ️ Ez egy **tájékoztató becslés** — a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott burkolat és szaniterek függvényében.`,
+        ``,
+        `**Mit tartalmaz?** Kulcsrakész ár: bontás, gépészet, villany, vízszigetelés, burkolás, festés, valamint a szaniterek és csaptelepek anyaga és beépítése.`,
+        ``,
+        `**Mi a következő lépés?**`,
+        `• Kollégánk **hamarosan keresi** a megadott telefonszámon.`,
+        `• Egyeztetünk egy időpontot az **ingyenes felmérésre**.`,
+        `• Utána megkapja a **végleges, tételes ajánlatot**.`,
     ].join("\n");
 
-    // Bubble 3 — recap of everything the customer said
-    const recap = [`**Az Ön válaszai:**`];
-    recap.push(`• Fürdőszoba mérete: ${sizeLabel(sel.size)}`);
-    recap.push(`• Kivitelezési szint: ${lbl("tier", sel.tier)}`);
-    recap.push(`• Zuhany / kád: ${lbl("washing", sel.washing)}`);
-    recap.push(`• Elrendezés: ${lbl("layout", sel.layout)}`);
-    recap.push(`• Padlófűtés: ${lbl("heating", sel.heating)}`);
-    recap.push(`• Név: ${sel.name || "—"}`);
-    recap.push(`• E-mail: ${sel.email || "—"}`);
-    recap.push(`• Telefon: ${sel.phone || "—"}`);
-    recap.push(`• Irányítószám: ${sel.postal_code || "—"}`);
-    recap.push(`• Tervezett keret: ${lbl("budget", sel.budget)}`);
-    recap.push(`• Tervezett kivitelezés: ${lbl("timeline", sel.timeline)}`);
+    // Bubble 3 — compact recap of the PROJECT only (no echo of the contact data
+    // they just typed; the owner gets all of that by e-mail).
+    const recap = [`**Az Ön igénye röviden:**`];
+    recap.push(`• Méret: **${sizeLabel(sel.size)}** · Szint: **${lbl("tier", sel.tier)}**`);
+    recap.push(`• Zuhany / kád: **${lbl("washing", sel.washing)}** · Elrendezés: **${lbl("layout", sel.layout)}**`);
+    recap.push(`• Padlófűtés: **${lbl("heating", sel.heating)}**`);
     recap.push(``);
-    recap.push(`Az adatait továbbítottuk az NM Bau-hoz — hamarosan keressük! 📞 ${PHONE}`);
+    recap.push(`Sürgős esetben hívjon: 📞 ${PHONE}`);
     if (EMAIL_OFFER_ENABLED) {
         recap.push(``);
         recap.push(`Szeretné, hogy e-mailben is elküldjük az ajánlatot?`);
     }
 
-    return [priceBubble, noteBubble, recap.join("\n")].join("\n[[SPLIT]]\n");
+    return [priceBubble, nextBubble, recap.join("\n")].join("\n[[SPLIT]]\n");
 }
 
 const PHONE = process.env.LEAD_PHONE || "+36 30 260 57 56";
@@ -517,7 +536,7 @@ KÉRDÉSEK SORRENDJE (egyesével, mindig csak EGY kérdés!). ELŐSZÖR az 1–7
    • **Áthelyezés** – új elrendezés, több gépészeti munkával
    Értékek: "marad", "athelyez", "nem_tudom".
 5. heating — **félkövér** fő kérdés "Szeretne elektromos padlófűtést a fürdőbe?" + egy rövid magyarázó sor (kellemes meleg padló, csempe alá fektetett fűtőszőnyeg). Értékek: "igen", "nem", "nem_tudom".
-6. budget — "Nagyjából milyen összeget szánna a felújításra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben — a gombokat a rendszer megjeleníti. Sávok (csak neked): 1 millió alatt → b_1m; 1–2 millió → b_1_2; 2–3 millió → b_2_3; 3 millió felett → b_3m; "Még nem tudom" → b_unsure. Konkrét számot sorolj be a megfelelő sávba.
+6. budget — "Nagyjából milyen összeget szánna a felújításra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben — a gombokat a rendszer megjeleníti. Sávok (csak neked): 1 millió alatt → b_1m; 1–2 millió → b_1_2; 2–3 millió → b_2_3; 3 millió felett → b_3m; "Még nem tudom" → b_unsure. Konkrét számot sorolj be a megfelelő sávba. FONTOS: fogadd el a választ és LÉPJ TOVÁBB a 7. kérdésre. Ha az összeg irreálisan alacsony egy teljes felújításhoz, LEGFELJEBB EGYSZER, finoman jelezd (pl. "egy teljes felújítás jellemzően 1 millió Ft-tól indul"), de utána MINDENKÉPP lépj tovább — SOHA ne tedd fel újra ugyanazt a kérdést, ne ragadj ismétlődő körbe.
 7. timeline — "Mikorra szeretné a kivitelezést?" RÖVIDEN kérdezz, a gombokat a rendszer megjeleníti. Lehetőségek (csak neked): Amint lehet → t_asap; Egy hónapon belül → t_month; Fél éven belül → t_halfyear; Még idén → t_thisyear; "Még nem tudom" → t_unsure.
 
 ELÉRHETŐSÉGEK — CSAK a 7. kérdés UTÁN kérd el ezeket, az árajánlat elküldéséhez és a visszahíváshoz. A 8. kérdés ELŐTT írj egy rövid átvezető mondatot, pl.: "Köszönöm! Hogy elküldhessük a személyre szabott árajánlatot és felvehessük Önnel a kapcsolatot, kérek még pár adatot." Utána KÜLÖN-KÜLÖN, egyesével kérdezd (a 8–11. szabad szöveg, NINCS gomb), és minden kérdésnél mondd meg RÖVIDEN, miért kéred:
@@ -628,28 +647,36 @@ export default async function handler(request, response) {
             });
         }
 
-        // --- EARLY E-MAIL CHECK: if the customer is answering the e-mail field,
-        // catch an obvious typo (esp. a misspelled gmail.com) BEFORE spending a
-        // model call. We keep the field unrecorded so it stays "pending" and the
-        // flow waits for a corrected address. ---
+        // --- EARLY CONTACT CHECK: if the customer is answering a contact field,
+        // validate it BEFORE spending a model call. On a bad value we keep the
+        // field unrecorded so it stays "pending" and re-ask — this is what stops
+        // a rejected phone/e-mail bleeding into the NEXT field. ---
         {
             const priorSel = Array.isArray(history)
                 ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => extractData(m.content))
                 : [];
             const baseSel = mergeState(state, ...priorSel);
-            if (pendingField(baseSel) === "email" && typeof question === "string" && question.trim()) {
-                const issue = emailIssue(question);
-                if (issue) {
-                    return response.status(200).json({
-                        answer: issue === "gmail"
-                            ? "Hoppá, úgy tűnik **elírás** csúszott a címbe — a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét. 🙏"
-                            : "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).",
-                        chips: [],
-                        state: baseSel,
-                        progress: PROGRESS_FIELDS.filter((f) => baseSel[f] != null && String(baseSel[f]).trim() !== "").length,
-                        progressTotal: PROGRESS_FIELDS.length,
-                    });
+            const pend = pendingField(baseSel);
+            let reask = null;
+            if (typeof question === "string" && question.trim()) {
+                if (pend === "email") {
+                    const i = emailIssue(question);
+                    if (i === "gmail") reask = "Hoppá, úgy tűnik **elírás** csúszott a címbe — a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét. 🙏";
+                    else if (i) reask = "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).";
+                } else if (pend === "phone") {
+                    if (phoneIssue(question)) reask = "Ezt a **telefonszámot** nem sikerült értelmezni. Kérem, adja meg a teljes számát (pl. **+36 20 123 4567** vagy **06 30 123 4567**).";
+                } else if (pend === "postal_code") {
+                    if (postalIssue(question)) reask = "Az **irányítószám** 4 számjegyű (pl. **3525**). Kérem, így adja meg.";
                 }
+            }
+            if (reask) {
+                return response.status(200).json({
+                    answer: reask,
+                    chips: [],
+                    state: baseSel,
+                    progress: PROGRESS_FIELDS.filter((f) => baseSel[f] != null && String(baseSel[f]).trim() !== "").length,
+                    progressTotal: PROGRESS_FIELDS.length,
+                });
             }
         }
 
