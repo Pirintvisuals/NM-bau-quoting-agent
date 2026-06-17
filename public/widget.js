@@ -435,16 +435,39 @@
     return Math.round(n).toLocaleString("hu-HU") + " Ft";
   }
 
+  // Friendlier range: big sums in "millió Ft" (e.g. "5,3 – 6,6 millió Ft"),
+  // smaller ones in full forints. Much more scannable than 8-digit numbers.
+  function fmtRange(low, high) {
+    if (high >= 1000000) {
+      const m = (n) => (Math.round(n / 100000) / 10).toLocaleString("hu-HU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      return `${m(low)} – ${m(high)} millió Ft`;
+    }
+    return `${fmtHuf(low)} – ${fmtHuf(high)}`;
+  }
+
+  let lastEstimateText = null; // so we only pulse when the value actually changes
+
   // Update the live "Becsült ár" banner from the backend's running estimate.
   // partial = still refining (wider range); false = final, locked-in range.
   function updateEstimate(est) {
     if (!estimateBarEl) return;
-    if (!est || est.low == null || est.high == null) { estimateBarEl.style.display = "none"; return; }
+    if (!est || est.low == null || est.high == null) { estimateBarEl.style.display = "none"; lastEstimateText = null; return; }
+    const wasVisible = estimateBarEl.style.display !== "none";
     estimateBarEl.style.display = "flex";
     const val = estimateBarEl.querySelector(".faq-estimate-val");
     const note = estimateBarEl.querySelector(".faq-estimate-note");
-    if (val) val.textContent = `${fmtHuf(est.low)} – ${fmtHuf(est.high)}`;
+    const text = fmtRange(est.low, est.high);
+    if (val) val.textContent = text;
     if (note) note.textContent = est.partial ? "pontosítással szűkül" : "véglegesített sáv";
+    // Pulse the banner when the number changes (and it was already on screen) so
+    // people SEE it move/tighten — the main reason they keep answering.
+    if (wasVisible && text !== lastEstimateText) {
+      estimateBarEl.classList.remove("faq-estimate--pulse");
+      void estimateBarEl.offsetWidth; // restart the animation
+      estimateBarEl.classList.add("faq-estimate--pulse");
+      setTimeout(() => estimateBarEl && estimateBarEl.classList.remove("faq-estimate--pulse"), 650);
+    }
+    lastEstimateText = text;
   }
 
   // Update the progress bar from the backend's answered/total counts.
@@ -516,8 +539,25 @@
     }
   }
 
+  // Animation for the live estimate banner (kept inline so it works on any host
+  // page regardless of the external stylesheet).
+  function injectEstimateStyles() {
+    if (document.getElementById("faq-estimate-anim")) return;
+    const s = document.createElement("style");
+    s.id = "faq-estimate-anim";
+    s.textContent =
+      ".faq-estimate{transition:background-color .4s ease}" +
+      ".faq-estimate .faq-estimate-val{display:inline-block;transition:transform .25s ease}" +
+      ".faq-estimate--pulse{animation:faqEstFlash .65s ease}" +
+      ".faq-estimate--pulse .faq-estimate-val{animation:faqEstPop .5s ease}" +
+      "@keyframes faqEstFlash{0%,55%{background:#3d320c}100%{background:#1C1917}}" +
+      "@keyframes faqEstPop{0%{transform:scale(1)}40%{transform:scale(1.13)}100%{transform:scale(1)}}";
+    document.head.appendChild(s);
+  }
+
   function init() {
     injectStyles();
+    injectEstimateStyles();
     createLauncher();
   }
 

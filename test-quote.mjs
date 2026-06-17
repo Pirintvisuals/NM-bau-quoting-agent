@@ -34,12 +34,19 @@ const renoCases = [
       sel: { projectType: 'haz', size: '110', tier: 'mid', scope: 'teljes', bathrooms: '2', kitchen: 'uj',
              walls: 'nem', condition: 'lakott', floortile: 'fele_fele', windows: 'csere', heatingsys: 'radiator', klima: 'nem', exterior: 'homlokzat_teto' },
       total: [18_000_000, 32_000_000], perM2: [160_000, 320_000] },
-    { name: 'KONYHA 10 m², közepes, bútorral, gépekkel, marad',
-      sel: { projectType: 'konyha', size: '10', tier: 'mid', furniture: 'igen', appliances: 'igen', layout: 'marad' },
-      total: [1_200_000, 2_200_000], perM2: [80_000, 260_000] },
+    { name: 'KONYHA 10 m², közepes, bútorral (4–5 fm), gépekkel, marad',
+      sel: { projectType: 'konyha', size: '10', tier: 'mid', furniture: 'igen', kitchen_fm: 'fm_4_5', appliances: 'igen', layout: 'marad' },
+      total: [1_200_000, 2_400_000], perM2: [80_000, 260_000] },
     { name: 'SZOBA 15 m², közepes, teljes',
       sel: { projectType: 'szoba', size: '15', tier: 'mid', roomscope: 'teljes' },
       total: [400_000, 950_000], perM2: [25_000, 75_000] },
+    // Regional index: same Budapest flat should land ~8% over the same job rural.
+    { name: 'LAKÁS 60 m² Budapest (1011) — közepes, részleges, új konyha',
+      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '1011' },
+      total: [5_000_000, 8_000_000], perM2: [85_000, 145_000] },
+    { name: 'LAKÁS 60 m² vidék (4032 Debrecen) — közepes, részleges, új konyha',
+      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '4032' },
+      total: [4_200_000, 7_000_000], perM2: [75_000, 125_000] },
 ];
 
 const cases = [

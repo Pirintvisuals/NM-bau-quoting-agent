@@ -187,14 +187,15 @@ const RENO = {
     underfloorPerM2: 9000,    // vizes padlófűtés rendszer, /m²
     underfloorFixed: 150000,  // osztó-gyűjtő + bekötés
     heatpumpSystem:  3800000, // komplett levegő-víz hőszivattyús rendszer (belső elosztással)
-    // Kitchen (konyha) module.
+    // Kitchen (konyha) module. Cabinets + worktop priced per FOLYÓMÉTER (running
+    // metre) — the accurate driver — instead of floor m². A typical kitchen ≈ 4 fm.
     kitchen: {
-        base:       { basic: 28000, mid: 42000, premium: 65000 },   // /m²: csempe, gépészet/villany kiállás, padló, festés
-        furniture:  { basic: 350000, mid: 700000, premium: 1400000 },
-        appliances: { basic: 250000, mid: 380000, premium: 650000 },
-        countertop: { basic: 40000,  mid: 70000,  premium: 110000 },
-        moveExtra:  150000, // víz/gáz/villany áthelyezés új elrendezésnél
-        fixed:      60000,
+        base:          { basic: 28000, mid: 42000, premium: 65000 }, // /m²: csempe, gépészet/villany kiállás, padló, festés
+        furniturePerM: { basic: 110000, mid: 175000, premium: 340000 }, // konyhabútor /folyóméter
+        countertopPerM:{ basic: 12000,  mid: 22000,  premium: 45000 },  // munkalap /folyóméter
+        appliances:    { basic: 250000, mid: 380000, premium: 650000 },
+        moveExtra:     150000, // víz/gáz/villany áthelyezés új elrendezésnél
+        fixed:         60000,
     },
     // Exterior (családi ház).
     exterior: {
@@ -329,13 +330,38 @@ function buildBathroom(sel) {
 }
 
 // Turn an itemised list + area + band into the standard quote object every
-// renderer/e-mail/test consumes: { items, total, low, high, area, perM2 }.
+// renderer/e-mail/test consumes: { items, total, low, high, area, perM2, band }.
 function finalize(items, A, band) {
     const total = items.reduce((s, i) => s + i.huf, 0);
     const low = round10000(total * band.low);
     const high = round10000(total * band.high);
     const perM2 = Math.round(total / A); // implied turnkey Ft/m² (market sanity check)
-    return { items, total, low, high, area: A, perM2 };
+    return { items, total, low, high, area: A, perM2, band };
+}
+
+// Regional cost index from the Hungarian postal code. Labour (≈half of a turnkey
+// total) swings ~15–20% by region — Budapest highest, the eastern/southern Alföld
+// lowest — so the same flat shouldn't quote identically in Zugló and in a village.
+// Applied to the WHOLE quote, the net effect on the total stays a modest ±~8%.
+// Verified spread: Budapest ~70–75k Ft/m² labour vs kisvárosok ~55–65k (qjob/Daibau).
+function regionMultiplier(postal) {
+    const d = String(postal || "").replace(/\D/g, "");
+    if (!/^\d{4}$/.test(d)) return 1.0; // unknown → national baseline
+    const f = d[0];
+    if (f === "1") return 1.08;               // Budapest
+    if (f === "2" || f === "8" || f === "9") return 1.03; // Pest agglomeráció + nyugat-Dunántúl + Balaton
+    if (f === "3" || f === "4" || f === "5") return 0.94; // észak-kelet + Alföld (alacsonyabb munkadíj)
+    return 1.0;                               // 6xxx, 7xxx — országos átlag körül
+}
+
+// Apply the regional index to a finished quote: scale each line so the breakdown
+// still sums to the total, then recompute the band-based range. No-op at mult 1.0
+// (so the unit tests, which pass no postal code, are unaffected).
+function withRegion(quote, postal) {
+    const mult = regionMultiplier(postal);
+    if (mult === 1.0) return quote;
+    const items = quote.items.map((i) => ({ label: i.label, huf: round1000(i.huf * mult) }));
+    return finalize(items, quote.area, quote.band);
 }
 
 // ---------------------------------------------------------------------------
@@ -389,9 +415,10 @@ function buildFullReno(sel, pt) {
     add(`Fürdőszoba/WC szaniter és vízszigetelés (${baths} db)`, RENO.bathroomFitout[tier] * baths);
 
     // New kitchen furniture + worktop (a konyha gépészete/villanya a héjban van).
+    // Flat/house flow doesn't ask cabinet length, so assume a typical ~4 fm run.
     if (sel.kitchen === "uj") {
         const k = RENO.kitchen;
-        add("Konyhabútor és munkalap", k.furniture[tier] + k.countertop[tier]);
+        add("Konyhabútor és munkalap", (k.furniturePerM[tier] + k.countertopPerM[tier]) * 4);
     }
 
     // REFINE — window replacement (becsült darabszám az alapterületből).
@@ -431,12 +458,19 @@ function buildKitchen(sel) {
     const add = (label, huf) => { if (huf > 0) items.push({ label, huf: round1000(huf) }); };
 
     add("Bontás, burkolás, gépészet- és villanykiállás, padló, festés", k.base[tier] * A + k.fixed);
-    if (sel.furniture === "igen") add("Konyhabútor és munkalap", k.furniture[tier] + k.countertop[tier]);
+    if (sel.furniture === "igen") {
+        // Cabinets + worktop scale with RUNNING METRES (folyóméter), the accurate
+        // driver — not floor m². Unknown → ~4 fm (a typical kitchen run).
+        const fm = KITCHEN_FM_METRES[sel.kitchen_fm] || 4;
+        add(`Konyhabútor és munkalap (${String(fm).replace(".", ",")} fm)`, (k.furniturePerM[tier] + k.countertopPerM[tier]) * fm);
+    }
     if (sel.appliances === "igen") add("Beépített gépek (sütő, főzőlap, páraelszívó stb.)", k.appliances[tier]);
     if (sel.layout === "athelyez") add("Víz/gáz/villany pontok áthelyezése", k.moveExtra);
 
     return finalize(items, A, RENO.band);
 }
+// Kitchen cabinet run length (folyóméter) per stored token.
+const KITCHEN_FM_METRES = { fm_2_3: 2.5, fm_3_4: 3.5, fm_4_5: 4.5, fm_5_6: 5.5, fm_6p: 7, nem_tudom: 4 };
 
 // ---------------------------------------------------------------------------
 //  Single room / space (szoba). roomscope: festes | festes_padlo | teljes.
@@ -465,10 +499,12 @@ function buildRoom(sel) {
 // "furdo") → the original bathroom engine, so existing callers/tests are unchanged.
 function buildQuote(sel) {
     const pt = sel && sel.projectType;
-    if (pt === "lakas" || pt === "haz") return buildFullReno(sel, pt);
-    if (pt === "konyha") return buildKitchen(sel);
-    if (pt === "szoba") return buildRoom(sel);
-    return buildBathroom(sel);
+    let q;
+    if (pt === "lakas" || pt === "haz") q = buildFullReno(sel, pt);
+    else if (pt === "konyha") q = buildKitchen(sel);
+    else if (pt === "szoba") q = buildRoom(sel);
+    else q = buildBathroom(sel);
+    return withRegion(q, sel && sel.postal_code);
 }
 
 // Exported for unit testing the pricing math (no effect in production).
@@ -482,13 +518,16 @@ export { buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, area
 // ---------------------------------------------------------------------------
 
 // ESSENTIAL project questions, in order. Enough to produce a ballpark range.
-// Shared tail (budget, timeline) + contact are appended by fieldOrder().
-function projectFields(pt) {
+// Shared tail (budget, timeline) + contact are appended by fieldOrder(). A couple
+// of fields are conditional on earlier answers (e.g. kitchen cabinet length only
+// matters if the customer wants new furniture), so this takes the state too.
+function projectFields(pt, sel = {}) {
     switch (pt) {
         case "furdo":  return ["size", "tier", "washing", "layout", "heating"];
         case "lakas":  return ["size", "scope", "tier", "bathrooms", "kitchen"];
         case "haz":    return ["size", "scope", "tier", "bathrooms", "kitchen"];
-        case "konyha": return ["size", "tier", "furniture", "appliances", "layout"];
+        case "konyha": return ["size", "tier", "furniture",
+            ...(sel.furniture === "igen" ? ["kitchen_fm"] : []), "appliances", "layout"];
         case "szoba":  return ["size", "roomscope", "tier"];
         default:       return [];
     }
@@ -512,7 +551,7 @@ const CONTACT_FIELDS = ["name", "email", "phone", "postal_code"];
 function fieldOrder(sel) {
     const pt = sel && sel.projectType;
     if (!pt) return ["projectType"];
-    const base = ["projectType", ...projectFields(pt), ...TAIL_FIELDS, ...CONTACT_FIELDS];
+    const base = ["projectType", ...projectFields(pt, sel), ...TAIL_FIELDS, ...CONTACT_FIELDS];
     if (!hasRefine(pt)) return base;
     base.push("refine_gate");
     if (sel.refine_gate === "yes") base.push(...refineFields(pt));
@@ -524,7 +563,7 @@ function fieldOrder(sel) {
 function progressFields(sel) {
     const pt = sel && sel.projectType;
     if (!pt) return ["projectType"];
-    return ["projectType", ...projectFields(pt), ...TAIL_FIELDS];
+    return ["projectType", ...projectFields(pt, sel), ...TAIL_FIELDS];
 }
 
 // Backend decides when the quote is complete — independent of the AI model.
@@ -574,6 +613,7 @@ const CHIP_LABELS = {
     heatingsys: ["Marad a mostani", "Radiátorcsere", "Padlófűtés", "Hőszivattyús rendszer", "Nem tudom"],
     exterior: ["Nincs külső munka", "Homlokzati szigetelés", "Tetőfelújítás", "Homlokzat + tető", "Teljes külső", "Nem tudom"],
     furniture: ["Igen, új bútor kell", "Nem, marad", "Nem tudom"],
+    kitchen_fm: ["2–3 fm", "3–4 fm", "4–5 fm", "5–6 fm", "6 fm felett", "Nem tudom"],
     appliances: ["Igen, gépekkel", "Nem, saját gépek", "Nem tudom"],
     timeline: ["Amint lehet", "Egy hónapon belül", "Fél éven belül", "Még idén", "Még nem tudom"],
     // --- Refine stage ---
@@ -616,6 +656,7 @@ const CHOICE_VALUES = {
     heatingsys: { "marad a mostani": "marad", "radiátorcsere": "radiator", "padlófűtés": "padlofutes", "hőszivattyús rendszer": "hoszivattyu", "nem tudom": "nem_tudom" },
     exterior: { "nincs külső munka": "nincs", "homlokzati szigetelés": "homlokzat", "tetőfelújítás": "teto", "homlokzat + tető": "homlokzat_teto", "teljes külső": "teljes", "nem tudom": "nem_tudom" },
     furniture: { "igen, új bútor kell": "igen", "nem, marad": "nem", "nem tudom": "nem_tudom" },
+    kitchen_fm: { "2–3 fm": "fm_2_3", "3–4 fm": "fm_3_4", "4–5 fm": "fm_4_5", "5–6 fm": "fm_5_6", "6 fm felett": "fm_6p", "nem tudom": "nem_tudom" },
     appliances: { "igen, gépekkel": "igen", "nem, saját gépek": "nem", "nem tudom": "nem_tudom" },
     timeline: { "amint lehet": "t_asap", "egy hónapon belül": "t_month", "fél éven belül": "t_halfyear", "még idén": "t_thisyear", "még nem tudom": "t_unsure" },
     // --- Refine stage ---
@@ -781,6 +822,7 @@ const LABELS = {
     heatingsys: { marad: "Marad a mostani", radiator: "Radiátorcsere", padlofutes: "Padlófűtés", hoszivattyu: "Hőszivattyús rendszer", nem_tudom: "Nem tudja (alap: marad)" },
     exterior: { nincs: "Nincs külső munka", homlokzat: "Homlokzati szigetelés", teto: "Tetőfelújítás", homlokzat_teto: "Homlokzat + tető", teljes: "Teljes külső", nem_tudom: "Nem tudja (alap: nincs)" },
     furniture: { igen: "Igen, új bútor", nem: "Nem, marad", nem_tudom: "Nem tudja" },
+    kitchen_fm: { fm_2_3: "2–3 fm", fm_3_4: "3–4 fm", fm_4_5: "4–5 fm", fm_5_6: "5–6 fm", fm_6p: "6 fm felett", nem_tudom: "Nem tudja (~4 fm)" },
     appliances: { igen: "Igen, gépekkel", nem: "Nem, saját gépek", nem_tudom: "Nem tudja" },
     walls: { igen: "Igen, falmozgatás is", nem: "Nem, maradnak a falak", nem_tudom: "Nem tudja (alap: nem)" },
     condition: { ujszeru: "Újszerű (kevés bontás)", lakott: "Lakott (teljes bontás)", regi: "Régi, elhasználódott", nem_tudom: "Nem tudja" },
@@ -810,7 +852,7 @@ function sizeLabel(size, pt) {
 // Choice fields with fixed tokens, validated against their allowed set below.
 const CHOICE_FIELDS = ["projectType", "tier", "washing", "layout", "heating", "scope",
     "roomscope", "bathrooms", "kitchen", "windows", "heatingsys", "exterior",
-    "furniture", "appliances", "walls", "condition", "floortile", "klima",
+    "furniture", "kitchen_fm", "appliances", "walls", "condition", "floortile", "klima",
     "refine_gate", "budget", "timeline"];
 
 // Drop any choice-field value the model invents that isn't a known canonical
@@ -853,6 +895,7 @@ function summaryPairs(sel) {
         if (pt === "haz" && has("exterior")) p.push(["Külső munkák", lbl("exterior", sel.exterior)]);
     } else if (pt === "konyha") {
         p.push(["Új konyhabútor", lbl("furniture", sel.furniture)]);
+        if (sel.furniture === "igen" && sel.kitchen_fm) p.push(["Bútor hossza", lbl("kitchen_fm", sel.kitchen_fm)]);
         p.push(["Beépített gépek", lbl("appliances", sel.appliances)]);
         p.push(["Elrendezés", lbl("layout", sel.layout)]);
     } else if (pt === "szoba") {
@@ -868,7 +911,7 @@ function summaryPairs(sel) {
 function runningEstimate(sel) {
     if (!sel || (sel.projectType !== "lakas" && sel.projectType !== "haz")) return null;
     const filled = (k) => sel[k] != null && String(sel[k]).trim() !== "";
-    if (!projectFields(sel.projectType).every(filled)) return null; // essentials incomplete
+    if (!projectFields(sel.projectType, sel).every(filled)) return null; // essentials incomplete
     const q = buildQuote(sel);
     const unknown = refineFields(sel.projectType).filter((f) => !filled(f)).length;
     const k = Math.min(0.12, unknown * 0.02); // extra uncertainty per open refine question
@@ -981,6 +1024,7 @@ A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL
 1. size — "Körülbelül hány négyzetméteres a konyha?" (szám vagy gomb) → <szám>|nem_tudom
 2. tier — kivitelezési szint → basic|mid|premium|nem_tudom
 3. furniture — "Kell-e új konyhabútor és munkalap?" → igen|nem|nem_tudom
+3b. kitchen_fm — CSAK ha furniture=igen: "Milyen hosszú a konyhabútor (folyóméterben, a szekrénysor hossza)?" → fm_2_3|fm_3_4|fm_4_5|fm_5_6|fm_6p|nem_tudom
 4. appliances — "Beépített gépeket is kér (sütő, főzőlap, páraelszívó)?" → igen|nem|nem_tudom
 5. layout — "Marad a mostani elrendezés, vagy áthelyeznénk a víz/gáz/villany pontokat?" → marad|athelyez|nem_tudom
 
@@ -1033,8 +1077,8 @@ SZABÁLYOK
 
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett vagy az adott típushoz nem tartozó mezők értéke üres string (""). SOSE találgass — csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
-<!--DATA:{"projectType":"","size":"","tier":"","washing":"","layout":"","heating":"","scope":"","roomscope":"","bathrooms":"","kitchen":"","windows":"","heatingsys":"","exterior":"","furniture":"","appliances":"","walls":"","condition":"","floortile":"","klima":"","refine_gate":"","budget":"","timeline":"","name":"","email":"","phone":"","postal_code":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|konyha|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; kitchen: uj|felujitas|nem|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; exterior: nincs|homlokzat|teto|homlokzat_teto|teljes|nem_tudom; furniture: igen|nem|nem_tudom; appliances: igen|nem|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: b_1m|b_1_2|b_2_3|b_3m|b_5m|b_5_10|b_10_15|b_15m|b_10m|b_10_20|b_20_35|b_35m|b_unsure; timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
+<!--DATA:{"projectType":"","size":"","tier":"","washing":"","layout":"","heating":"","scope":"","roomscope":"","bathrooms":"","kitchen":"","windows":"","heatingsys":"","exterior":"","furniture":"","kitchen_fm":"","appliances":"","walls":"","condition":"","floortile":"","klima":"","refine_gate":"","budget":"","timeline":"","name":"","email":"","phone":"","postal_code":""}-->
+A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|konyha|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; kitchen: uj|felujitas|nem|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; exterior: nincs|homlokzat|teto|homlokzat_teto|teljes|nem_tudom; furniture: igen|nem|nem_tudom; kitchen_fm: fm_2_3|fm_3_4|fm_4_5|fm_5_6|fm_6p|nem_tudom; appliances: igen|nem|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: b_1m|b_1_2|b_2_3|b_3m|b_5m|b_5_10|b_10_15|b_15m|b_10m|b_10_20|b_20_35|b_35m|b_unsure; timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") — és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 A választógombokat a rendszer automatikusan megjeleníti — neked nem kell gombokat kiírnod.`;
 
