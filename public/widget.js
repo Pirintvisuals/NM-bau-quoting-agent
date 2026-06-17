@@ -17,6 +17,7 @@
   let lastLead = null; // { sel, quote } — held so the customer can request the e-mail
   let thinkingEl = null;
   let progressFillEl = null, progressLabelEl = null, progressBarEl = null;
+  let estimateBarEl = null; // live "becsült ár" banner (full flat/house only)
 
   let container = null;
 
@@ -24,16 +25,16 @@
   // Varied angles (price, speed, specific trades, CTA) so it stays interesting
   // and invites a click. Edit / add freely.
   const TEASERS = [
-    "Mennyibe kerül a fürdőszobám felújítása?",
+    "Mennyibe kerül a felújításom?",
     "Kérjen ingyenes árajánlatot 1 perc alatt!",
     "Pár kérdés, és máris látja a várható árat.",
-    "Új fürdőt tervez? Számoljuk ki együtt!",
-    "Kíváncsi a burkolás és a gépészet árára?",
-    "Kulcsrakész fürdőszoba — kérjen kalkulációt!",
-    "Nem tudja, mi a reális ár? Segítünk!",
-    "Zuhany vagy kád? Mutatjuk az árát is!",
+    "Lakást, fürdőt vagy konyhát újítana fel?",
+    "Kíváncsi a felújítás reális árára?",
+    "Kulcsrakész felújítás — kérjen kalkulációt!",
+    "Teljes lakásfelújítást tervez? Számoljunk!",
+    "Fürdő, konyha, ház — mutatjuk az árát is!",
     "Ingyenes helyszíni felmérés — kezdje itt!",
-    "Felújítaná a fürdőt? Kérdezzen tőlünk!",
+    "Felújítana? Kérdezzen tőlünk bátran!",
   ];
   const TEASER_ROTATE_MS = 9000; // how long each question stays before swapping
   const TEASER_DISMISS_KEY = "nmbau_teaser_dismissed";
@@ -241,6 +242,18 @@
     progressFillEl = progress.querySelector(".faq-progress-fill");
     progressLabelEl = progress.querySelector(".faq-progress-label");
 
+    // ---- Live estimate banner (shown once there's enough to estimate) ----
+    estimateBarEl = document.createElement("div");
+    estimateBarEl.className = "faq-estimate";
+    estimateBarEl.style.cssText =
+      "display:none;align-items:center;justify-content:space-between;gap:8px;" +
+      "padding:10px 14px;background:#1C1917;color:#fff;border-bottom:2px solid #B8860B;" +
+      "font-family:inherit;";
+    estimateBarEl.innerHTML =
+      '<span style="font-size:12px;color:#D6D3D1">Becsült ár</span>' +
+      '<span class="faq-estimate-val" style="font-size:15px;font-weight:700;color:#fff"></span>' +
+      '<span class="faq-estimate-note" style="font-size:10px;color:#A8A29E;text-align:right;flex:0 0 auto"></span>';
+
     // ---- Messages ----
     messagesContainer = document.createElement("div");
     messagesContainer.className = "faq-chat-messages";
@@ -270,6 +283,7 @@
 
     chatWindow.appendChild(header);
     chatWindow.appendChild(progress);
+    chatWindow.appendChild(estimateBarEl);
     chatWindow.appendChild(messagesContainer);
     chatWindow.appendChild(inputBar);
 
@@ -278,8 +292,8 @@
 
     if (!started) {
       started = true;
-      addMessage("bot", `Üdvözlöm az **${BRAND}** **fürdőszoba-felújítás** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.`);
-      sendMessage("Szeretnék árajánlatot fürdőszoba-felújításra.", true);
+      addMessage("bot", `Üdvözlöm az **${BRAND}** **felújítási** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.`);
+      sendMessage("Szeretnék árajánlatot egy felújításra.", true);
     }
   }
 
@@ -416,6 +430,23 @@
     if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
   }
 
+  // Money formatter matching the backend (e.g. "7 800 000 Ft").
+  function fmtHuf(n) {
+    return Math.round(n).toLocaleString("hu-HU") + " Ft";
+  }
+
+  // Update the live "Becsült ár" banner from the backend's running estimate.
+  // partial = still refining (wider range); false = final, locked-in range.
+  function updateEstimate(est) {
+    if (!estimateBarEl) return;
+    if (!est || est.low == null || est.high == null) { estimateBarEl.style.display = "none"; return; }
+    estimateBarEl.style.display = "flex";
+    const val = estimateBarEl.querySelector(".faq-estimate-val");
+    const note = estimateBarEl.querySelector(".faq-estimate-note");
+    if (val) val.textContent = `${fmtHuf(est.low)} – ${fmtHuf(est.high)}`;
+    if (note) note.textContent = est.partial ? "pontosítással szűkül" : "véglegesített sáv";
+  }
+
   // Update the progress bar from the backend's answered/total counts.
   function updateProgress(done, total) {
     if (!progressFillEl || !total) return;
@@ -462,6 +493,7 @@
       if (typeof data.progress === "number" && typeof data.progressTotal === "number") {
         updateProgress(data.progress, data.progressTotal);
       }
+      if ("estimate" in data) updateEstimate(data.estimate);
       const botResponse = data.answer || "Elnézést, nem találtam választ.";
       // A response may contain [[SPLIT]] markers → render as separate bubbles
       // for readability (e.g. the final quote: price / note / recap).
