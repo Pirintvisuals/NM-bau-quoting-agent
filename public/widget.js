@@ -14,7 +14,7 @@
   let conversationHistory = []; // [{ role: "user"|"assistant", content: "..." }]
   let convState = {}; // accumulated answer-state, carried turn-to-turn (chips/quote rely on it)
   let started = false;
-  let lastLead = null; // { sel, quote } — held so the customer can request the e-mail
+  let lastLead = null; // { sel, quote } - held so the customer can request the e-mail
   let thinkingEl = null;
   let progressFillEl = null, progressLabelEl = null, progressBarEl = null;
   let estimateBarEl = null; // live "becsült ár" banner (full flat/house only)
@@ -30,17 +30,17 @@
     "Pár kérdés, és máris látja a várható árat.",
     "Lakást, fürdőt vagy konyhát újítana fel?",
     "Kíváncsi a felújítás reális árára?",
-    "Kulcsrakész felújítás — kérjen kalkulációt!",
+    "Kulcsrakész felújítás - kérjen kalkulációt!",
     "Teljes lakásfelújítást tervez? Számoljunk!",
-    "Fürdő, konyha, ház — mutatjuk az árát is!",
-    "Ingyenes helyszíni felmérés — kezdje itt!",
+    "Fürdő, konyha, ház - mutatjuk az árát is!",
+    "Ingyenes helyszíni felmérés - kezdje itt!",
     "Felújítana? Kérdezzen tőlünk bátran!",
   ];
   const TEASER_ROTATE_MS = 9000; // how long each question stays before swapping
   const TEASER_DISMISS_KEY = "nmbau_teaser_dismissed";
   let teaserIdx = Math.floor(Math.random() * TEASERS.length); // start varied
   let teaserTimer = null;       // rotation interval
-  // Once the user closes the bubble with ×, it stays gone — remembered across
+  // Once the user closes the bubble with ×, it stays gone - remembered across
   // page loads/visits via localStorage (falls back to in-memory if unavailable).
   let teaserDismissed = false;
   try { teaserDismissed = localStorage.getItem(TEASER_DISMISS_KEY) === "1"; } catch (e) {}
@@ -82,7 +82,7 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "faq-chat-launcher";
-    btn.setAttribute("aria-label", `Csevegés megnyitása — ${BRAND}`);
+    btn.setAttribute("aria-label", `Csevegés megnyitása - ${BRAND}`);
     btn.innerHTML = `<span class="faq-launcher-ring" aria-hidden="true"></span>${ICON.chat}<span class="faq-launcher-dot" aria-hidden="true"></span>`;
     btn.onclick = toggleChat;
     container.appendChild(btn);
@@ -460,7 +460,7 @@
     if (val) val.textContent = text;
     if (note) note.textContent = est.partial ? "pontosítással szűkül" : "véglegesített sáv";
     // Pulse the banner when the number changes (and it was already on screen) so
-    // people SEE it move/tighten — the main reason they keep answering.
+    // people SEE it move/tighten - the main reason they keep answering.
     if (wasVisible && text !== lastEstimateText) {
       estimateBarEl.classList.remove("faq-estimate--pulse");
       void estimateBarEl.offsetWidth; // restart the animation

@@ -14,7 +14,7 @@ const fmt = (n) => Math.round(n).toLocaleString('hu-HU') + ' Ft';
 // where it's meaningful (full flat/house); kitchen/room bound by total instead.
 const renoCases = [
     // ESSENTIAL-ONLY ballpark (no refine): the realistic MIDDLE scope is the default
-    // a "közepes" customer lands on — should feel sensible, not alarming.
+    // a "közepes" customer lands on - should feel sensible, not alarming.
     { name: 'LAKÁS 60 m², közepes, RÉSZLEGES, 1 fürdő, új konyha (csak alapkérdések)',
       sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj' },
       total: [4_500_000, 7_500_000], perM2: [80_000, 130_000] },
@@ -41,10 +41,10 @@ const renoCases = [
       sel: { projectType: 'szoba', size: '15', tier: 'mid', roomscope: 'teljes' },
       total: [400_000, 950_000], perM2: [25_000, 75_000] },
     // Regional index: same Budapest flat should land ~8% over the same job rural.
-    { name: 'LAKÁS 60 m² Budapest (1011) — közepes, részleges, új konyha',
+    { name: 'LAKÁS 60 m² Budapest (1011) - közepes, részleges, új konyha',
       sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '1011' },
       total: [5_000_000, 8_000_000], perM2: [85_000, 145_000] },
-    { name: 'LAKÁS 60 m² vidék (4032 Debrecen) — közepes, részleges, új konyha',
+    { name: 'LAKÁS 60 m² vidék (4032 Debrecen) - közepes, részleges, új konyha',
       sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '4032' },
       total: [4_200_000, 7_000_000], perM2: [75_000, 125_000] },
 ];
