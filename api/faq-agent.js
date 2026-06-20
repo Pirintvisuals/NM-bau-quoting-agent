@@ -122,10 +122,12 @@ const MODEL = {
 //   - Teljes villanyszerelés anyaggal: 11 000–16 000 Ft/m² (Daibau/qjob/neonvill).
 //   - Festés (2 réteg, anyag+munka): 1 400–3 500 Ft/m² felület; gipszkarton 2 000–6 500.
 //   - Laminált/vinyl padló beépítve: ~8 000–20 000; parketta feljebb (Daibau/qjob).
-//   - Beltéri ajtó tokkal, beépítve: ~50 000–150 000 Ft/db (piaci).
+//   - Beltéri ajtó tokkal, beépítve: ~65 000–180 000 Ft/db (qjob 2026: dekorfólia
+//     ~44e + beépítés 24,5–50e; CPL 75–100e; furnér 140–180e).
 //   - Műanyag ablak cserével: 40 000–135 000 Ft/db (qjob/joszaki/Hoffmann).
 //   - Radiátor csere: 40 000–80 000 Ft/db; vizes padlófűtés rendszer: 7 000–9 000
-//     Ft/m²; kondenzációs kazán+telepítés ~0,9 M; hőszivattyús rendszer 3–5 M.
+//     Ft/m²; kondenzációs kazán+telepítés ~0,9 M; komplett levegő-víz hőszivattyús
+//     rendszer 3,1–6,25 M (Daibau/qjob 2026: ~2,7M egység + 0,6–1,2M szerelés + kieg.).
 //   - Konyhafelújítás: standard 800 000–900 000, prémium 1,7–2,7 M; bútor
 //     200 000–800 000+, gépek 300 000–400 000, munkalap 14 000–110 000 (qjob).
 //   - Homlokzati hőszigetelés: 22 000–30 000 Ft/m²; tetőfelújítás teljes 35 000–
@@ -177,7 +179,7 @@ const RENO = {
     wallsRelocate: 200000,
     // Split AC unit, supplied + installed, /db.
     klimaEach:     350000,
-    door:   { basic: 55000, mid: 90000, premium: 150000 }, // beltéri ajtó tokkal, /db
+    door:   { basic: 65000, mid: 90000, premium: 150000 }, // beltéri ajtó tokkal, /db (alap: ~44e dekorfólia + ~25e beépítés)
     window: { basic: 60000, mid: 90000, premium: 140000 }, // műanyag ablak cserével, /db
     // Wet-room fit-out PREMIUM over a dry room (extra vízszigetelés + szaniterek +
     // csaptelep + zuhany/kád), /fürdő. A burkolás/gépészet már a héjban benne van.
@@ -186,7 +188,7 @@ const RENO = {
     radiatorEach:    55000,   // radiátor csere, /db
     underfloorPerM2: 9000,    // vizes padlófűtés rendszer, /m²
     underfloorFixed: 150000,  // osztó-gyűjtő + bekötés
-    heatpumpSystem:  3800000, // komplett levegő-víz hőszivattyús rendszer (belső elosztással)
+    heatpumpSystem:  4200000, // komplett levegő-víz hőszivattyús rendszer (belső elosztással): ~2,7M egység + 0,6–1,2M szerelés + 0,3–0,8M kiegészítők
     // Kitchen (konyha) module. Cabinets + worktop priced per FOLYÓMÉTER (running
     // metre) — the accurate driver — instead of floor m². A typical kitchen ≈ 4 fm.
     kitchen: {
