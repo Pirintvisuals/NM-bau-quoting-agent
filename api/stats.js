@@ -7,11 +7,19 @@ const PROJECT_ID = process.env.POSTHOG_PROJECT_ID || "207574";
 const POSTHOG_API = process.env.POSTHOG_API_HOST || "https://eu.posthog.com";
 
 export default async function handler(req, res) {
-    const key = process.env.POSTHOG_API_KEY;
+    const key = (process.env.POSTHOG_API_KEY || "").trim();
 
     if (!key) {
         return res.status(500).json({
             error: "POSTHOG_API_KEY is not set in the environment.",
+        });
+    }
+
+    // Guard against a masked / mis-pasted value (e.g. the bullet dots PostHog
+    // shows instead of the real key). A real personal key starts with "phx_".
+    if (/[^\x20-\x7E]/.test(key) || !key.startsWith("phx_")) {
+        return res.status(500).json({
+            error: "POSTHOG_API_KEY looks wrong - it should be the real key starting with 'phx_'. Re-copy the actual key from PostHog (not the masked dots) and update it in Vercel.",
         });
     }
 
