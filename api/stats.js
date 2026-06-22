@@ -15,11 +15,12 @@ export default async function handler(req, res) {
         });
     }
 
-    // Guard against a masked / mis-pasted value (e.g. the bullet dots PostHog
-    // shows instead of the real key). A real personal key starts with "phx_".
-    if (/[^\x20-\x7E]/.test(key) || !key.startsWith("phx_")) {
+    // Guard only against a masked / mis-pasted value: the bullet dots PostHog
+    // shows are non-ASCII and would crash the HTTP header. A real key is plain
+    // ASCII, so we don't assume any particular prefix here.
+    if (/[^\x20-\x7E]/.test(key)) {
         return res.status(500).json({
-            error: "POSTHOG_API_KEY looks wrong - it should be the real key starting with 'phx_'. Re-copy the actual key from PostHog (not the masked dots) and update it in Vercel.",
+            error: "POSTHOG_API_KEY contains masked/invalid characters. Copy the actual key text from PostHog (not the dots) and update it in Vercel, then redeploy.",
         });
     }
 
