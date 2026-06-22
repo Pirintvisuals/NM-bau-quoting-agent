@@ -6,6 +6,65 @@
   const PHONE = "+36 30 260 57 56";
   const BRAND = "NM Bau";
 
+  // --- Analytics (PostHog) -------------------------------------------------
+  // Drop-in usage tracking. ALL events are tagged with `client` so a single
+  // PostHog project gives you a per-client breakdown (this widget is embedded
+  // on many sites). Nothing the customer types (name / e-mail / phone / address)
+  // is ever sent as an event property or shown in a session replay - see the
+  // PII masking in initAnalytics() and addMessage().
+  //
+  // Setup: create a free EU project at https://eu.posthog.com, copy the
+  // "Project API Key" (starts with phc_), and either paste it below or set
+  // window.NMBAU_CONFIG.posthogKey before loading this script. Until a real key
+  // is set, analytics simply stays off and the widget works exactly as before.
+  const POSTHOG_KEY = config.posthogKey || "phc_nroFe9H8K9hbVENBqcRRrWW9GXxoyVZhSomy3U8Zhu4P";
+  const POSTHOG_HOST = config.posthogHost || "https://eu.i.posthog.com";
+  // Identifies which client/site this embed belongs to. Set per client via
+  // window.NMBAU_CONFIG.client = "clientname"; falls back to the host name.
+  const CLIENT_ID = config.client || (location.hostname || "unknown");
+  const WIDGET_VERSION = "2026-06-22";
+  // Session replay is on by default (you asked for it). Set
+  // window.NMBAU_CONFIG.sessionReplay = false to turn it off for a client.
+  const SESSION_REPLAY = config.sessionReplay !== false;
+
+  // Fire an analytics event. No-ops safely if PostHog isn't loaded / no key set.
+  function track(event, props) {
+    try {
+      if (window.posthog && typeof window.posthog.capture === "function") {
+        window.posthog.capture(event, props || {});
+      }
+    } catch (e) {}
+  }
+
+  function analyticsEnabled() {
+    return POSTHOG_KEY && POSTHOG_KEY.indexOf("REPLACE") === -1;
+  }
+
+  function initAnalytics() {
+    if (!analyticsEnabled()) return; // no key yet -> stay off, widget unaffected
+    // Official PostHog loader snippet (async-loads array.js from the CDN).
+    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+    try {
+      window.posthog.init(POSTHOG_KEY, {
+        api_host: POSTHOG_HOST,
+        capture_pageview: false, // it's an embedded widget, not a page view
+        autocapture: false,      // we send our own clean, named events instead
+        disable_session_recording: !SESSION_REPLAY,
+        session_recording: {
+          maskAllInputs: true, // never record what the customer types (PII)
+          // also mask the customer's own chat bubbles (they contain name /
+          // address / etc.); bot bubbles + the price are left visible.
+          maskTextSelector: ".faq-msg.user .faq-bubble, .ph-no-capture",
+        },
+      });
+      window.posthog.register({
+        client: CLIENT_ID,
+        widget_version: WIDGET_VERSION,
+        language: navigator.language || "",
+      });
+    } catch (e) {}
+  }
+
   let chatOpen = false;
   let chatWindow = null;
   let messagesContainer = null;
@@ -18,6 +77,8 @@
   let thinkingEl = null;
   let progressFillEl = null, progressLabelEl = null, progressBarEl = null;
   let estimateBarEl = null; // live "becsült ár" banner (full flat/house only)
+  let lastProgress = 0, lastProgressTotal = 0; // for drop-off analytics
+  let quoteDone = false; // so quote_completed fires once per conversation
 
   let container = null;
 
@@ -168,6 +229,7 @@
       }, 180);
       chatOpen = false;
       if (launcher) launcher.classList.remove("active");
+      track("chat_closed", { answered: lastProgress, total: lastProgressTotal });
       // Bring the rotating teaser back so the launcher never sits there silent.
       setTimeout(() => showTeaser(), 400);
     } else {
@@ -185,6 +247,7 @@
       }
       chatOpen = true;
       if (launcher) launcher.classList.add("active");
+      track("chat_opened");
     }
   }
 
@@ -292,6 +355,7 @@
 
     if (!started) {
       started = true;
+      track("quote_started");
       addMessage("bot", `Üdvözlöm az **${BRAND}** **felújítási** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.`);
       sendMessage("Szeretnék árajánlatot egy felújításra.", true);
     }
@@ -352,11 +416,12 @@
     yes.type = "button";
     yes.className = "faq-chip faq-chip-primary";
     yes.innerHTML = `${ICON.mail}<span>Kérem e-mailben is</span>`;
-    yes.onclick = () => { clearChips(); requestEmail(); };
+    yes.onclick = () => { clearChips(); track("email_requested"); requestEmail(); };
 
     const no = makeChip("Köszönöm, nem");
     no.onclick = () => {
       clearChips();
+      track("email_declined");
       addMessage("bot", "Rendben, köszönjük a megkeresést! Hamarosan keressük. Ha sürgős, hívjon: " + PHONE);
     };
 
@@ -407,7 +472,7 @@
     const bubble = document.createElement("div");
     bubble.className = "faq-bubble";
     if (sender === "bot") bubble.innerHTML = renderMarkdown(text);
-    else bubble.textContent = text;
+    else { bubble.textContent = text; bubble.classList.add("ph-no-capture"); } // mask customer text in replay
 
     msg.appendChild(bubble);
     messagesContainer.appendChild(msg);
@@ -515,8 +580,39 @@
       if (data.state && typeof data.state === "object") convState = data.state;
       if (typeof data.progress === "number" && typeof data.progressTotal === "number") {
         updateProgress(data.progress, data.progressTotal);
+        // Tag every event from here on with the chosen project type, so the
+        // whole dashboard can be sliced by flat / bath / kitchen / etc.
+        if (convState && convState.projectType && window.posthog) {
+          try { window.posthog.register({ project_type: convState.projectType }); } catch (e) {}
+        }
+        // One event per answered question -> "how many questions they answer",
+        // and the last value reached drives the drop-off funnel. No PII: we send
+        // counts and the field just answered, never the typed text.
+        if (!hidden && data.progress > lastProgress) {
+          track("question_answered", {
+            answered: data.progress,
+            total: data.progressTotal,
+            project_type: convState && convState.projectType,
+          });
+        }
+        lastProgress = data.progress;
+        lastProgressTotal = data.progressTotal;
       }
       if ("estimate" in data) updateEstimate(data.estimate);
+
+      // Completion: backend returns `lead` only when the quote is ready. Send
+      // ONLY non-personal fields (project / size / tier / price range).
+      if (data.lead && !quoteDone) {
+        quoteDone = true;
+        const s = data.lead.sel || {}, q = data.lead.quote || {};
+        track("quote_completed", {
+          project_type: s.projectType,
+          size: s.size,
+          tier: s.tier,
+          quote_low: q.low,
+          quote_high: q.high,
+        });
+      }
       const botResponse = data.answer || "Elnézést, nem találtam választ.";
       // A response may contain [[SPLIT]] markers → render as separate bubbles
       // for readability (e.g. the final quote: price / note / recap).
@@ -556,9 +652,12 @@
   }
 
   function init() {
+    initAnalytics();
     injectStyles();
     injectEstimateStyles();
     createLauncher();
+    // Fires once per page where the widget loads -> "how many people see it".
+    track("widget_loaded");
   }
 
   if (document.readyState === "loading") {
