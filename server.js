@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import handler from './api/faq-agent.js';
+import statsHandler from './api/stats.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,6 +85,31 @@ const server = http.createServer(async (req, res) => {
                 res.end(JSON.stringify({ answer: 'Sorry, the server is acting up!' }));
             }
         });
+        return;
+    }
+
+    // Handle stats endpoint (read-only PostHog usage numbers)
+    if (req.url.startsWith('/api/stats') && req.method === 'GET') {
+        const u = new URL(req.url, `http://${req.headers.host}`);
+        req.query = Object.fromEntries(u.searchParams.entries());
+
+        res.status = (code) => {
+            res.statusCode = code;
+            return res;
+        };
+        res.json = (data) => {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(data));
+            return res;
+        };
+
+        try {
+            await statsHandler(req, res);
+        } catch (error) {
+            console.error('Stats error:', error.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: error.message }));
+        }
         return;
     }
 
