@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NM Bau - Usage</title>
+  <style>
+    body { margin: 0; font-family: 'Inter', -apple-system, sans-serif; background: #FAFAF7; color: #1C1917; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    h1 .accent { color: #B8860B; }
+    .sub { color: #57534E; margin: 0 0 24px; font-size: 14px; }
+    .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    select, button { font: inherit; padding: 8px 12px; border: 1px solid #D6D3D1; border-radius: 8px; background: #fff; cursor: pointer; }
+    button { background: #1C1917; color: #fff; border-color: #1C1917; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    th, td { padding: 12px 14px; text-align: right; border-bottom: 1px solid #F0EFEC; font-size: 14px; }
+    th:first-child, td:first-child { text-align: left; }
+    th { background: #F5F4F1; font-weight: 600; color: #44403C; }
+    tr:last-child td { border-bottom: none; }
+    .client { font-weight: 600; }
+    .pct { color: #57534E; }
+    .msg { color: #57534E; padding: 24px 0; }
+    .err { color: #B91C1C; }
+    .foot { color: #A8A29E; font-size: 12px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>NM Bau <span class="accent">usage</span></h1>
+    <p class="sub">How people are using the quoting widget, per client website.</p>
+
+    <div class="controls">
+      <label for="days">Period:</label>
+      <select id="days">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last 12 months</option>
+      </select>
+      <button id="refresh">Refresh</button>
+    </div>
+
+    <div id="out" class="msg">Loading...</div>
+    <p class="foot">Counts come straight from PostHog. "Finished %" = finished quotes / quotes started.</p>
+  </div>
+
+  <script>
+    var out = document.getElementById('out');
+    var daysSel = document.getElementById('days');
+
+    // If a password is set, append it to the URL as ?token=... once and the
+    // page remembers it. Open the page as stats.html?token=YOURPASSWORD.
+    function tokenParam() {
+      var m = location.search.match(/[?&]token=([^&]+)/);
+      if (m) { try { sessionStorage.setItem('nmbau_token', m[1]); } catch (e) {} return '&token=' + m[1]; }
+      try { var t = sessionStorage.getItem('nmbau_token'); if (t) return '&token=' + t; } catch (e) {}
+      return '';
+    }
+
+    function fmt(n) { return (n == null ? 0 : n).toLocaleString(); }
+
+    function load() {
+      out.className = 'msg';
+      out.textContent = 'Loading...';
+      var days = daysSel.value;
+      fetch('/api/stats?days=' + days + tokenParam())
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok) {
+            out.className = 'msg err';
+            out.textContent = 'Error: ' + (res.j.error || 'could not load') + (res.j.detail ? ' - ' + res.j.detail : '');
+            return;
+          }
+          render(res.j.rows || []);
+        })
+        .catch(function (e) {
+          out.className = 'msg err';
+          out.textContent = 'Error: ' + e.message;
+        });
+    }
+
+    function render(rows) {
+      if (!rows.length) {
+        out.className = 'msg';
+        out.textContent = 'No data yet for this period.';
+        return;
+      }
+      var html = '<table><thead><tr>' +
+        '<th>Client</th><th>People</th><th>Loaded</th><th>Opened chat</th>' +
+        '<th>Started quote</th><th>Finished quote</th><th>Finished %</th><th>Wanted email</th>' +
+        '</tr></thead><tbody>';
+      rows.forEach(function (r) {
+        var pct = r.started ? Math.round((r.completed / r.started) * 100) : 0;
+        html += '<tr>' +
+          '<td class="client">' + (r.client || '(unknown)') + '</td>' +
+          '<td>' + fmt(r.people) + '</td>' +
+          '<td>' + fmt(r.loaded) + '</td>' +
+          '<td>' + fmt(r.opened) + '</td>' +
+          '<td>' + fmt(r.started) + '</td>' +
+          '<td>' + fmt(r.completed) + '</td>' +
+          '<td class="pct">' + pct + '%</td>' +
+          '<td>' + fmt(r.emails) + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+      out.className = '';
+      out.innerHTML = html;
+    }
+
+    document.getElementById('refresh').addEventListener('click', load);
+    daysSel.addEventListener('change', load);
+    load();
+  </script>
+</body>
+</html>
