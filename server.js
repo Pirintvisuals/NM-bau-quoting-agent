@@ -54,12 +54,20 @@ const server = http.createServer(async (req, res) => {
     // Handle API endpoint
     if (req.url === '/api/faq-agent' && req.method === 'POST') {
         let body = '';
+        let tooBig = false;
 
         req.on('data', chunk => {
             body += chunk.toString();
+            if (body.length > 200_000) { // ~200KB cap - reject oversized bodies
+                tooBig = true;
+                res.writeHead(413, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ answer: 'Payload too large' }));
+                req.destroy();
+            }
         });
 
         req.on('end', async () => {
+            if (tooBig) return;
             try {
                 // Parse body manually for local server
                 req.body = JSON.parse(body || '{}');
@@ -113,8 +121,16 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Serve static files from public directory
-    let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
+    // Serve static files from public directory. Confine to publicDir so a crafted
+    // path like /../server.js can't escape and read files outside public/.
+    const publicDir = path.join(__dirname, 'public');
+    const reqPath = decodeURIComponent((req.url || '/').split('?')[0]);
+    let filePath = path.normalize(path.join(publicDir, reqPath === '/' ? 'index.html' : reqPath));
+    if (filePath !== publicDir && !filePath.startsWith(publicDir + path.sep)) {
+        res.writeHead(403, { 'Content-Type': 'text/html' });
+        res.end('<h1>403 - Forbidden</h1>', 'utf-8');
+        return;
+    }
     const extname = String(path.extname(filePath)).toLowerCase();
     const contentType = mimeTypes[extname] || 'application/octet-stream';
 

@@ -8,11 +8,12 @@
 //    (<!--DATA:{...}-->). We parse it, price it, e-mail the owner, and return an
 //    itemised estimate (shown as a RANGE) to the customer.
 //
-//  WHY A RANGE: a remodel total genuinely depends on choices that only firm up
-//  at the site survey, so we quote a tight ±~10% band around the model's point
-//  estimate (e.g. "2 150 000 – 2 580 000 Ft"), which is what an honest contractor
-//  gives over the phone. The few questions we ask are the ones that actually move
-//  the price (size, finish tier, shower/bath, layout change, underfloor heating).
+//  WHY RANGES: a remodel total genuinely depends on choices that only firm up at
+//  the site survey, so EVERY line is quoted as a realistic "kb." range whose width
+//  is per-trade (fixtures swing a lot, demolition little), and the headline total
+//  is the SUM of those item ranges (e.g. "2 150 000 – 3 330 000 Ft"). All amounts
+//  are NET (nettó) - no gross/VAT figure is shown. The few questions we ask are the
+//  ones that actually move the price (size, finish tier, shower/bath, layout, heat).
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -51,58 +52,54 @@
 const MODEL = {
     // Variable, area-scaling labour + consumables (per m² of TILED surface,
     // i.e. floor + walls). Excludes the tile material itself (separate line).
-    tileLabor:   { basic: 8500, mid: 10500, premium: 13500 }, // Ft / m² felület
-    smallRoomUplift: 1500, // +Ft/m² tiling labour when area ≤ 4 m² (fiddly small jobs)
+    tileLabor:   { basic: 10500, mid: 13000, premium: 16000 }, // Ft / m² felület
+    smallRoomUplift: 3000, // +Ft/m² tiling labour when area ≤ 4 m² (fiddly small jobs)
 
     // Tile + floor-tile MATERIAL, per m² of tiled surface (×1.1 for waste).
-    tileMaterial: { basic: 4500, mid: 9000, premium: 18000 },
+    tileMaterial: { basic: 7000, mid: 13000, premium: 24000 },
 
     // Demolition + debris removal: per m² of tiled surface + fixed container/strip.
     // The fixed part (container hire + haulage + mobilisation) is a real floor that
     // every job carries - set realistically so the smallest jobs aren't under-quoted.
-    demoPerM2: 3000,
-    demoFixed: 90000,
+    demoPerM2: 4500,
+    demoFixed: 170000,
 
     // Screed levelling (aljzatkiegyenlítés): over the whole FLOOR, per m².
-    screedPerM2: 6500,
+    screedPerM2: 7500,
     // Two-layer brush-on waterproofing (kétrétegű kenhető vízszigetelés): over the
     // FLOOR *plus* the wet-zone walls behind the shower/bath (not just the floor -
     // this is the fix for the previously under-priced prep line). Per m².
-    waterproofPerM2: 7000,
+    waterproofPerM2: 8500,
     // Primer, corner/joint sealing tapes, floor drain collar - fixed wet-room setup.
-    prepFixed: 30000,
+    prepFixed: 50000,
 
     // Plumbing (water + waste pipes, rough-in, fixture connections), by layout.
-    plumbingKeep: 150000,   // elrendezés marad
-    plumbingMove: 280000,   // áthelyezés / új elrendezés
-    plumbingBathExtra: 30000,   // +kád külön bekötés
-    plumbingBothExtra: 50000,   // +kád ÉS zuhany
+    plumbingKeep: 360000,   // elrendezés marad (300-500e sávban)
+    plumbingMove: 480000,   // áthelyezés / új elrendezés (300-500e sávban)
+    plumbingBathExtra: 60000,   // +kád külön bekötés
+    plumbingBothExtra: 90000,   // +kád ÉS zuhany
 
     // Electrical (lights, sockets, mirror, towel rail, ventilation), by tier.
-    electrical: { basic: 90000, mid: 120000, premium: 160000 },
+    electrical: { basic: 170000, mid: 220000, premium: 300000 },
 
     // Sanitary base set: WC + washbasin + vanity + taps + accessories, by tier.
-    sanitaryBase: { basic: 180000, mid: 350000, premium: 650000 },
+    sanitaryBase: { basic: 430000, mid: 620000, premium: 1050000 },
 
     // Shower / bath element (appliance + glass/screen + install), by choice & tier.
     washing: {
-        zuhany:      { basic: 120000, mid: 220000, premium: 400000 }, // zuhanytálca üveg fallal
-        zuhanykabin: { basic: 90000,  mid: 160000, premium: 300000 }, // komplett zuhanykabin
-        kad:         { basic: 90000,  mid: 160000, premium: 320000 }, // fürdőkád + kádparaván
-        mindketto:   { basic: 210000, mid: 320000, premium: 560000 }, // kád + külön zuhany
+        zuhany:      { basic: 200000, mid: 330000, premium: 540000 }, // épített zuhanyzó üveg fallal
+        zuhanykabin: { basic: 150000, mid: 240000, premium: 410000 }, // komplett zuhanykabin
+        kad:         { basic: 150000, mid: 240000, premium: 430000 }, // fürdőkád + kádparaván
+        mindketto:   { basic: 320000, mid: 470000, premium: 770000 }, // kád + külön zuhany
     },
 
     // Painting + skim (ceiling and non-tiled wall parts): per m² floor + fixed.
-    paintPerM2: 4000,
-    paintFixed: 15000,
+    paintPerM2: 5500,
+    paintFixed: 25000,
 
     // OPTION - electric underfloor heating mat + thermostat + install.
-    heatPerM2: 18000,
-    heatFixed: 40000,
-
-    // Quote band around the point estimate (what the customer sees).
-    bandLow: 0.92,
-    bandHigh: 1.10,
+    heatPerM2: 22000,
+    heatFixed: 55000,
 };
 
 // ---------------------------------------------------------------------------
@@ -111,7 +108,7 @@ const MODEL = {
 //  METHODOLOGY: same bottom-up turnkey philosophy as the bathroom model, but a
 //  full renovation is composed from (a) per-m² SHELL trades scaled by floor area
 //  + finish tier, plus (b) discrete add-ons priced per unit (doors, windows,
-//  bathrooms, kitchen furniture, heating system, exterior). This composition is
+//  bathrooms, kitchen furniture, heating system). This composition is
 //  transparent and each piece is grounded in a published 2025–2026 figure rather
 //  than a single flat Ft/m², so the parts you don't choose don't inflate the total.
 //
@@ -137,37 +134,37 @@ const MODEL = {
 const RENO = {
     // FULL GUT (teljes) interior shell - turnkey Ft / m² of FLOOR area, by tier.
     full: {
-        demo:    { basic: 9000,  mid: 11000, premium: 14000 }, // bontás + törmelék
-        masonry: { basic: 17000, mid: 24000, premium: 34000 }, // falazás, vakolás, gipszkarton, glettelés
-        screed:  { basic: 6000,  mid: 7000,  premium: 9000 },  // aljzatkiegyenlítés
-        plumb:   { basic: 12000, mid: 15000, premium: 20000 }, // víz + csatorna teljes csere
-        elec:    { basic: 13000, mid: 16000, premium: 22000 }, // teljes villany + szerelvény
-        floor:   { basic: 15000, mid: 22000, premium: 38000 }, // burkolás + padló (anyag+munka, vegyes)
-        paint:   { basic: 5500,  mid: 7000,  premium: 10000 }, // festés + glettelés
-        fixed:   120000, // egész lakásra: konténer, mobilizáció, végtakarítás
+        demo:    { basic: 10500, mid: 13000, premium: 16500 }, // bontás + törmelék
+        masonry: { basic: 20000, mid: 28000, premium: 40000 }, // falazás, vakolás, gipszkarton, glettelés
+        screed:  { basic: 7000,  mid: 8000,  premium: 10500 }, // aljzatkiegyenlítés
+        plumb:   { basic: 14000, mid: 18000, premium: 24000 }, // víz + csatorna teljes csere
+        elec:    { basic: 15000, mid: 19000, premium: 26000 }, // teljes villany + szerelvény
+        floor:   { basic: 17500, mid: 26000, premium: 44000 }, // burkolás + padló (anyag+munka, vegyes)
+        paint:   { basic: 6500,  mid: 8000,  premium: 11500 }, // festés + glettelés
+        fixed:   150000, // egész lakásra: konténer, mobilizáció, végtakarítás
     },
     // PARTIAL (reszleges) interior - the realistic MIDDLE: new surfaces (burkolat,
     // padló, festés) + fixture-level plumbing/electrical + bathroom/kitchen, but
     // NOT a full pipe/wall/wiring rip-out. This is what most "közepes" customers
     // actually mean, and the tier the binary kozmetikai/teljes model was missing.
     partial: {
-        demo:    { basic: 5000,  mid: 6500,  premium: 8500 },  // részleges bontás (nem teljes strip)
-        masonry: { basic: 9000,  mid: 13000, premium: 19000 }, // faljavítás, glett, kis gipszkarton
-        screed:  { basic: 3500,  mid: 4500,  premium: 6000 },
-        plumb:   { basic: 5000,  mid: 7000,  premium: 10000 }, // szerelvény-szintű, nem teljes csere
-        elec:    { basic: 5000,  mid: 7000,  premium: 10000 }, // részleges (nem teljes újrahúzás)
-        floor:   { basic: 15000, mid: 22000, premium: 38000 }, // új burkolás + padló ugyanúgy
-        paint:   { basic: 5500,  mid: 7000,  premium: 10000 },
-        fixed:   80000,
+        demo:    { basic: 6000,  mid: 7800,  premium: 10000 }, // részleges bontás (nem teljes strip)
+        masonry: { basic: 10500, mid: 15500, premium: 22500 }, // faljavítás, glett, kis gipszkarton
+        screed:  { basic: 4000,  mid: 5300,  premium: 7000 },
+        plumb:   { basic: 6000,  mid: 8400,  premium: 12000 }, // szerelvény-szintű, nem teljes csere
+        elec:    { basic: 6000,  mid: 8400,  premium: 12000 }, // részleges (nem teljes újrahúzás)
+        floor:   { basic: 17500, mid: 26000, premium: 44000 }, // új burkolás + padló ugyanúgy
+        paint:   { basic: 6500,  mid: 8000,  premium: 11500 },
+        fixed:   100000,
     },
     // COSMETIC (kozmetikai) interior - festés + új padló + apró villany/javítás,
     // a csövek és falak bontása NÉLKÜL. Turnkey Ft / m² of floor area, by tier.
     cosmetic: {
-        floor: { basic: 14000, mid: 20000, premium: 32000 },
-        paint: { basic: 5000,  mid: 7000,  premium: 10000 },
-        elec:  { basic: 2000,  mid: 3000,  premium: 4500 }, // lámpa/kapcsoló/dugalj csere
-        patch: { basic: 2500,  mid: 3500,  premium: 5000 }, // glettelés, apró javítás
-        fixed: 60000,
+        floor: { basic: 16500, mid: 24000, premium: 38000 },
+        paint: { basic: 6000,  mid: 8000,  premium: 11500 },
+        elec:  { basic: 2400,  mid: 3600,  premium: 5400 }, // lámpa/kapcsoló/dugalj csere
+        patch: { basic: 3000,  mid: 4200,  premium: 6000 }, // glettelés, apró javítás
+        fixed: 75000,
     },
     // --- Refine-stage inputs (only change the price when the customer opts in) ---
     // Current condition: scales the demolition line (less to strip / more to strip).
@@ -175,43 +172,32 @@ const RENO = {
     // Floor finish split: tile is dearer than laminate/parketta - shift the floor line.
     floortileMult: { tobb_csempe: 1.25, fele_fele: 1.0, tobb_laminalt: 0.82 },
     // Building/removing walls + relocating wet-points (big swing on falazás + gépészet).
-    wallsPerM2:    6000,
-    wallsRelocate: 200000,
+    wallsPerM2:    7000,
+    wallsRelocate: 240000,
     // Split AC unit, supplied + installed, /db.
-    klimaEach:     350000,
-    door:   { basic: 65000, mid: 90000, premium: 150000 }, // beltéri ajtó tokkal, /db (alap: ~44e dekorfólia + ~25e beépítés)
-    window: { basic: 60000, mid: 90000, premium: 140000 }, // műanyag ablak cserével, /db
+    klimaEach:     400000,
+    door:   { basic: 78000, mid: 108000, premium: 175000 }, // beltéri ajtó tokkal, /db (alap: ~44e dekorfólia + ~25e beépítés)
+    window: { basic: 72000, mid: 105000, premium: 165000 }, // műanyag ablak cserével, /db
     // Wet-room fit-out PREMIUM over a dry room (extra vízszigetelés + szaniterek +
     // csaptelep + zuhany/kád), /fürdő. A burkolás/gépészet már a héjban benne van.
-    bathroomFitout: { basic: 450000, mid: 750000, premium: 1300000 },
+    bathroomFitout: { basic: 650000, mid: 1050000, premium: 1700000 },
     // Heating-system upgrades.
-    radiatorEach:    55000,   // radiátor csere, /db
-    underfloorPerM2: 9000,    // vizes padlófűtés rendszer, /m²
-    underfloorFixed: 150000,  // osztó-gyűjtő + bekötés
-    heatpumpSystem:  4200000, // komplett levegő-víz hőszivattyús rendszer (belső elosztással): ~2,7M egység + 0,6–1,2M szerelés + 0,3–0,8M kiegészítők
+    radiatorEach:    65000,   // radiátor csere, /db
+    underfloorPerM2: 10500,   // vizes padlófűtés rendszer, /m²
+    underfloorFixed: 180000,  // osztó-gyűjtő + bekötés
+    heatpumpSystem:  4600000, // komplett levegő-víz hőszivattyús rendszer (belső elosztással): ~2,7M egység + 0,6–1,2M szerelés + 0,3–0,8M kiegészítők
     // Kitchen (konyha) module. Cabinets + worktop priced per FOLYÓMÉTER (running
     // metre) - the accurate driver - instead of floor m². A typical kitchen ≈ 4 fm.
     kitchen: {
-        base:          { basic: 28000, mid: 42000, premium: 65000 }, // /m²: csempe, gépészet/villany kiállás, padló, festés
-        furniturePerM: { basic: 110000, mid: 175000, premium: 340000 }, // konyhabútor /folyóméter
-        countertopPerM:{ basic: 12000,  mid: 22000,  premium: 45000 },  // munkalap /folyóméter
-        appliances:    { basic: 250000, mid: 380000, premium: 650000 },
-        moveExtra:     150000, // víz/gáz/villany áthelyezés új elrendezésnél
-        fixed:         60000,
-    },
-    // Exterior (családi ház).
-    exterior: {
-        facadePerM2:  { basic: 22000, mid: 25000, premium: 29000 }, // homlokzati hőszigetelés
-        roofPerM2:    42000, // teljes tetőfelújítás
-        pavingPerM2:  13000, // térkövezés
-        fencePerM:    18000, // kerítés, /folyóméter
-        facadeFactor: 1.4,   // homlokzatterület ≈ alapterület × ennyi (földszintes becslés)
-        roofFactor:   1.25,  // tetőterület ≈ alapterület × ennyi
-        pavingDefault: 30,   // m², "teljes külső"-nél (felmérés pontosítja)
-        fenceDefault:  25,   // folyóméter, "teljes külső"-nél (felmérés pontosítja)
+        base:          { basic: 33000, mid: 49000, premium: 75000 }, // /m²: csempe, gépészet/villany kiállás, padló, festés
+        furniturePerM: { basic: 130000, mid: 205000, premium: 390000 }, // konyhabútor /folyóméter
+        countertopPerM:{ basic: 14000,  mid: 26000,  premium: 52000 },  // munkalap /folyóméter
+        appliances:    { basic: 290000, mid: 440000, premium: 750000 },
+        moveExtra:     180000, // víz/gáz/villany áthelyezés új elrendezésnél
+        fixed:         75000,
     },
     band:      { low: 0.90, high: 1.12 }, // lakás / konyha / szoba sáv
-    bandHouse: { low: 0.85, high: 1.15 }, // ház: a külső munkák miatt szélesebb
+    bandHouse: { low: 0.85, high: 1.15 }, // ház: nagyobb projekt, szélesebb sáv
 };
 
 // Representative floor area (m²) when the customer doesn't give one, per type.
@@ -221,8 +207,8 @@ const FLOW_LABEL = {
     haz: "Családi ház felújítás", szoba: "Szobafelújítás",
 };
 
-// All prices are GROSS (ÁFA included) and TURNKEY (kulcsrakész): labour +
-// materials + fixtures - the all-in number the customer actually pays.
+// All prices are NET (nettó, ÁFA NÉLKÜL) and TURNKEY (kulcsrakész): labour +
+// materials + fixtures. The customer is shown net figures only - no gross/VAT.
 const APPLIANCE_INCLUDED = true;
 
 // Offer to e-mail the quote to the CUSTOMER. Requires a real Resend key + a
@@ -239,6 +225,100 @@ function formatHuf(n) {
 }
 const round1000 = (n) => Math.round(n / 1000) * 1000;
 const round10000 = (n) => Math.round(n / 10000) * 10000;
+
+// Every line is quoted as a realistic "kb." range, not a single number. The band
+// WIDTH is per-item, because the real-world uncertainty differs by trade: fixtures
+// (szaniter) swing a lot with the customer's choices, demolition far less. The
+// total range the customer sees is simply the sum of the per-item ranges.
+const ITEM_BAND_DEFAULT = 0.15;
+const ITEM_BAND = {
+    demo: 0.15, prep: 0.12, tileLabor: 0.14, tileMaterial: 0.22,
+    plumbing: 0.18, electrical: 0.18, sanitary: 0.30, paint: 0.14, heat: 0.12,
+    // whole-property lines
+    shell: 0.18, floor: 0.18, doors: 0.18, bathroom: 0.25, kitchen: 0.22,
+    windows: 0.18, heatsys: 0.20, klima: 0.15, walls: 0.20,
+};
+// Build one itemised line with its own range. `kind` selects the band width.
+function makeItem(label, huf, kind) {
+    const h = round1000(huf);
+    const frac = (kind != null && ITEM_BAND[kind] != null) ? ITEM_BAND[kind] : ITEM_BAND_DEFAULT;
+    return { label, huf: h, low: round1000(h * (1 - frac)), high: round1000(h * (1 + frac)) };
+}
+
+// ===========================================================================
+//  SECURITY HELPERS - this endpoint is public and spends real money (LLM API +
+//  Resend e-mail), so the goal is to make abuse (cost-draining floods, e-mail
+//  spam relay, prompt/HTML injection) impractical. These are app-level controls;
+//  for go-live also enable Vercel WAF rate-limiting / BotID at the platform edge.
+// ===========================================================================
+
+// HTML-escape any user-controlled string before it goes into an e-mail body.
+function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Best-effort client IP from the proxy headers Vercel sets.
+function clientIp(req) {
+    const xf = req.headers && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]);
+    if (typeof xf === "string" && xf.trim()) return xf.split(",")[0].trim();
+    return (req.socket && req.socket.remoteAddress) || "unknown";
+}
+
+// In-memory fixed-window rate limiter. Per-instance only (Vercel may run several),
+// so it's a best-effort first line, not a hard guarantee - pair with platform WAF.
+const RL_BUCKETS = new Map();
+function rateLimit(key, limit, windowMs) {
+    const now = Date.now();
+    let b = RL_BUCKETS.get(key);
+    if (!b || now > b.resetAt) { b = { count: 0, resetAt: now + windowMs }; RL_BUCKETS.set(key, b); }
+    b.count++;
+    if (RL_BUCKETS.size > 10000) { // opportunistic cleanup so the map can't grow forever
+        for (const [k, v] of RL_BUCKETS) if (now > v.resetAt) RL_BUCKETS.delete(k);
+    }
+    return b.count <= limit ? { ok: true } : { ok: false, retryAfter: Math.max(1, Math.ceil((b.resetAt - now) / 1000)) };
+}
+
+// Abuse limits (per IP). Generous enough for a real customer conversation, tight
+// enough that a script can't drain the LLM budget or blast e-mails.
+const RL_CHAT = { limit: Number(process.env.RL_CHAT_PER_MIN) || 30, windowMs: 60_000 };
+const RL_EMAIL = { limit: Number(process.env.RL_EMAIL_PER_HOUR) || 5, windowMs: 60 * 60_000 };
+
+// Payload shape/size caps - reject oversized or malformed bodies before we ever
+// call the model (token-cost protection) and strip client-injected system turns.
+const MAX_QUESTION_LEN = 2000;
+const MAX_HISTORY_MSGS = 40;
+const MAX_MSG_LEN = 8000;
+const ALLOWED_ROLES = new Set(["user", "assistant", "model"]); // NB: no "system"
+function validateChatInput(question, history) {
+    if (question != null && (typeof question !== "string" || question.length > MAX_QUESTION_LEN)) return "A kérdés túl hosszú.";
+    if (history != null) {
+        if (!Array.isArray(history) || history.length > MAX_HISTORY_MSGS) return "Érvénytelen előzmény.";
+        for (const m of history) {
+            if (!m || typeof m !== "object") return "Érvénytelen előzmény.";
+            if (typeof m.content !== "string" || m.content.length > MAX_MSG_LEN) return "Érvénytelen előzmény.";
+            if (!ALLOWED_ROLES.has(m.role)) return "Érvénytelen előzmény."; // blocks injected system prompts
+        }
+    }
+    return null;
+}
+
+// Restrictive CORS: the widget embeds on arbitrary client sites, so we allow any
+// origin BUT send no credentials (there are none) and never reflect cookies. If
+// ALLOWED_ORIGINS is set (comma-separated), we lock the API to those origins.
+function applyCors(req, res) {
+    const allow = (process.env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const origin = (req.headers && req.headers.origin) || "";
+    let value = "*";
+    if (allow.length) value = allow.includes(origin) ? origin : allow[0];
+    res.setHeader("Access-Control-Allow-Origin", value);
+    if (allow.length) res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "no-store");
+}
 
 // Representative floor area (m²) for a stored size value. Chip → band midpoint;
 // a free-typed number → itself; "nem_tudom"/unknown → 5 m² (typical) default.
@@ -291,54 +371,56 @@ function buildBathroom(sel) {
     const { total: T } = tiledSurface(A);
 
     const items = [];
-    const add = (label, huf) => items.push({ label, huf: round1000(huf) });
+    const add = (label, huf, kind) => items.push(makeItem(label, huf, kind));
 
     // 1 - Bontás + törmelékelszállítás
-    add("Bontás, törmelékelszállítás, konténer", MODEL.demoPerM2 * T + MODEL.demoFixed);
+    add("Bontás, törmelékelszállítás, konténer", MODEL.demoPerM2 * T + MODEL.demoFixed, "demo");
 
     // 2 - Aljzatkiegyenlítés + kétrétegű vízszigetelés (padló + vizes falak)
     const waterproofArea = A + wetWallArea(A);
     add("Aljzatkiegyenlítés és kétrétegű vízszigetelés",
-        MODEL.screedPerM2 * A + MODEL.waterproofPerM2 * waterproofArea + MODEL.prepFixed);
+        MODEL.screedPerM2 * A + MODEL.waterproofPerM2 * waterproofArea + MODEL.prepFixed, "prep");
 
     // 3 - Burkolás munkadíja (fal + padló)
     const tileLabor = MODEL.tileLabor[tier] + (A <= 4 ? MODEL.smallRoomUplift : 0);
-    add("Burkolás munkadíja (fal + padló)", tileLabor * T);
+    add("Burkolás munkadíja (fal + padló)", tileLabor * T, "tileLabor");
 
     // 4 - Csempe és járólap (anyag, +10% hulladék)
-    add("Csempe és járólap (anyag)", MODEL.tileMaterial[tier] * T * 1.1);
+    add("Csempe és járólap (anyag)", MODEL.tileMaterial[tier] * T * 1.1, "tileMaterial");
 
     // 5 - Gépészet (víz + lefolyó)
     let plumbing = sel.layout === "athelyez" ? MODEL.plumbingMove : MODEL.plumbingKeep;
     if (washing === "kad") plumbing += MODEL.plumbingBathExtra;
     if (washing === "mindketto") plumbing += MODEL.plumbingBothExtra;
-    add("Gépészet (víz- és lefolyóvezeték, bekötések)", plumbing);
+    add("Gépészet (víz- és lefolyóvezeték, bekötések)", plumbing, "plumbing");
 
     // 6 - Villanyszerelés
-    add("Villanyszerelés (világítás, csatlakozók, szellőztetés)", MODEL.electrical[tier]);
+    add("Villanyszerelés (világítás, csatlakozók, szellőztetés)", MODEL.electrical[tier], "electrical");
 
     // 7 - Szaniterek + csaptelepek (anyag + beépítés)
-    add("Szaniterek és csaptelepek (anyag + beépítés)", MODEL.sanitaryBase[tier] + MODEL.washing[washing][tier]);
+    add("Szaniterek és csaptelepek (anyag + beépítés)", MODEL.sanitaryBase[tier] + MODEL.washing[washing][tier], "sanitary");
 
     // 8 - Festés, glettelés
-    add("Festés, glettelés (mennyezet és nem burkolt falak)", MODEL.paintPerM2 * A + MODEL.paintFixed);
+    add("Festés, glettelés (mennyezet és nem burkolt falak)", MODEL.paintPerM2 * A + MODEL.paintFixed, "paint");
 
-    // 9 - OPTION: elektromos padlófűtés
-    if (sel.heating === "igen") {
-        add("Elektromos padlófűtés (fűtőszőnyeg + termosztát)", MODEL.heatPerM2 * A + MODEL.heatFixed);
+    // 9 - OPTION: elektromos padlófűtés (épített zuhanyzónál nem ajánljuk - lásd flow)
+    if (sel.heating === "igen" && washing !== "zuhany") {
+        add("Elektromos padlófűtés (fűtőszőnyeg + termosztát)", MODEL.heatPerM2 * A + MODEL.heatFixed, "heat");
     }
 
-    return finalize(items, A, { low: MODEL.bandLow, high: MODEL.bandHigh });
+    return finalize(items, A);
 }
 
-// Turn an itemised list + area + band into the standard quote object every
-// renderer/e-mail/test consumes: { items, total, low, high, area, perM2, band }.
-function finalize(items, A, band) {
+// Turn an itemised list (each line already carries its own low/high range) + area
+// into the standard quote object every renderer/e-mail/test consumes. The total
+// range is the SUM of the per-item ranges, so the headline band and the breakdown
+// are always consistent. All amounts are NET (nettó).
+function finalize(items, A) {
     const total = items.reduce((s, i) => s + i.huf, 0);
-    const low = round10000(total * band.low);
-    const high = round10000(total * band.high);
+    const low = round10000(items.reduce((s, i) => s + i.low, 0));
+    const high = round10000(items.reduce((s, i) => s + i.high, 0));
     const perM2 = Math.round(total / A); // implied turnkey Ft/m² (market sanity check)
-    return { items, total, low, high, area: A, perM2, band };
+    return { items, total, low, high, area: A, perM2 };
 }
 
 // Regional cost index from the Hungarian postal code. Labour (≈half of a turnkey
@@ -362,18 +444,23 @@ function regionMultiplier(postal) {
 function withRegion(quote, postal) {
     const mult = regionMultiplier(postal);
     if (mult === 1.0) return quote;
-    const items = quote.items.map((i) => ({ label: i.label, huf: round1000(i.huf * mult) }));
-    return finalize(items, quote.area, quote.band);
+    const items = quote.items.map((i) => ({
+        label: i.label,
+        huf: round1000(i.huf * mult),
+        low: round1000(i.low * mult),
+        high: round1000(i.high * mult),
+    }));
+    return finalize(items, quote.area);
 }
 
 // ---------------------------------------------------------------------------
 //  Full flat / family-house renovation (lakas | haz). Composed from per-m²
 //  shell trades + discrete add-ons (doors, bathrooms, kitchen, windows, heating,
-//  klíma, exterior). Grouped into logical, customer-readable lines.
+//  klíma). Grouped into logical, customer-readable lines.
 //
 //  ESSENTIAL inputs (always asked): size, scope, tier, bathrooms, kitchen.
 //  REFINE inputs (opt-in, default = neutral/none so they only ADD when chosen):
-//  walls, condition, floortile, windows, heatingsys, klima, (haz) exterior.
+//  walls, condition, floortile, windows, heatingsys, klima.
 //  This makes the early ballpark realistic, then the refine answers move it.
 // ---------------------------------------------------------------------------
 function buildFullReno(sel, pt) {
@@ -383,7 +470,7 @@ function buildFullReno(sel, pt) {
     const scope = ["kozmetikai", "reszleges", "teljes"].includes(sel.scope) ? sel.scope : "reszleges";
     const rooms = Math.max(1, Math.round(A / 18)); // helyiségszám-becslés
     const items = [];
-    const add = (label, huf) => { if (huf > 0) items.push({ label, huf: round1000(huf) }); };
+    const add = (label, huf, kind) => { if (huf > 0) items.push(makeItem(label, huf, kind)); };
 
     // Refine multipliers (neutral when the refine answer isn't given).
     const condMult = RENO.conditionMult[sel.condition] || 1.0;
@@ -391,62 +478,53 @@ function buildFullReno(sel, pt) {
 
     if (scope === "kozmetikai") {
         const c = RENO.cosmetic;
-        add("Bontás, előkészítés, takarítás", (c.fixed + c.patch[tier] * A) * condMult);
-        add("Burkolás / új padló (anyag + munka)", c.floor[tier] * A * floorMult);
-        add("Festés, glettelés", c.paint[tier] * A);
-        add("Villany frissítés (lámpák, kapcsolók, dugaljak)", c.elec[tier] * A);
+        add("Bontás, előkészítés, takarítás", (c.fixed + c.patch[tier] * A) * condMult, "shell");
+        add("Burkolás / új padló (anyag + munka)", c.floor[tier] * A * floorMult, "floor");
+        add("Festés, glettelés", c.paint[tier] * A, "paint");
+        add("Villany frissítés (lámpák, kapcsolók, dugaljak)", c.elec[tier] * A, "electrical");
     } else {
         const f = scope === "teljes" ? RENO.full : RENO.partial;
         const demoLbl = scope === "teljes" ? "Bontás, törmelékelszállítás, konténer" : "Részleges bontás, törmelékelszállítás";
         const wallLbl = scope === "teljes" ? "Falazás, vakolás, gipszkarton, glettelés" : "Faljavítás, glettelés, gipszkarton";
         const mepLbl = scope === "teljes" ? "Gépészet (víz, csatorna) és villanyszerelés" : "Gépészet és villany (részleges)";
-        add(demoLbl, f.demo[tier] * A * condMult + f.fixed);
-        add(wallLbl, f.masonry[tier] * A);
-        add("Aljzatkiegyenlítés és vízszigetelés", f.screed[tier] * A);
-        add(mepLbl, (f.plumb[tier] + f.elec[tier]) * A);
-        add("Burkolás és padló (anyag + munka)", f.floor[tier] * A * floorMult);
-        add("Festés, glettelés", f.paint[tier] * A);
-        add(`Beltéri ajtók (${rooms} db)`, RENO.door[tier] * rooms);
+        add(demoLbl, f.demo[tier] * A * condMult + f.fixed, "demo");
+        add(wallLbl, f.masonry[tier] * A, "shell");
+        add("Aljzatkiegyenlítés és vízszigetelés", f.screed[tier] * A, "prep");
+        add(mepLbl, (f.plumb[tier] + f.elec[tier]) * A, "plumbing");
+        add("Burkolás és padló (anyag + munka)", f.floor[tier] * A * floorMult, "floor");
+        add("Festés, glettelés", f.paint[tier] * A, "paint");
+        add(`Beltéri ajtók (${rooms} db)`, RENO.door[tier] * rooms, "doors");
     }
 
     // REFINE - building/removing walls + relocating wet-points.
-    if (sel.walls === "igen") add("Falátalakítás és vizes pont áthelyezés", RENO.wallsPerM2 * A + RENO.wallsRelocate);
+    if (sel.walls === "igen") add("Falátalakítás és vizes pont áthelyezés", RENO.wallsPerM2 * A + RENO.wallsRelocate, "walls");
 
     // Bathroom(s) fit-out (szaniter + vízszigetelés), per the bathroom count.
     const baths = bathCount(sel.bathrooms);
-    add(`Fürdőszoba/WC szaniter és vízszigetelés (${baths} db)`, RENO.bathroomFitout[tier] * baths);
+    add(`Fürdőszoba/WC szaniter és vízszigetelés (${baths} db)`, RENO.bathroomFitout[tier] * baths, "bathroom");
 
     // New kitchen furniture + worktop (a konyha gépészete/villanya a héjban van).
     // Flat/house flow doesn't ask cabinet length, so assume a typical ~4 fm run.
     if (sel.kitchen === "uj") {
         const k = RENO.kitchen;
-        add("Konyhabútor és munkalap", (k.furniturePerM[tier] + k.countertopPerM[tier]) * 4);
+        add("Konyhabútor és munkalap (vízkiállás-igazítással)", (k.furniturePerM[tier] + k.countertopPerM[tier]) * 4, "kitchen");
     }
 
     // REFINE - window replacement (becsült darabszám az alapterületből).
     if (sel.windows === "csere") {
         const wc = Math.max(2, Math.round(A / 12));
-        add(`Nyílászárócsere - ablakok (${wc} db)`, RENO.window[tier] * wc);
+        add(`Nyílászárócsere - ablakok (${wc} db)`, RENO.window[tier] * wc, "windows");
     }
 
     // REFINE - heating-system upgrade.
-    if (sel.heatingsys === "radiator") add(`Fűtéskorszerűsítés - radiátorcsere (${rooms} db)`, RENO.radiatorEach * rooms);
-    else if (sel.heatingsys === "padlofutes") add("Vizes padlófűtés (rendszer + szerelés)", RENO.underfloorPerM2 * A + RENO.underfloorFixed);
-    else if (sel.heatingsys === "hoszivattyu") add("Hőszivattyús fűtési rendszer (komplett)", RENO.heatpumpSystem);
+    if (sel.heatingsys === "radiator") add(`Fűtéskorszerűsítés - radiátorcsere (${rooms} db)`, RENO.radiatorEach * rooms, "heatsys");
+    else if (sel.heatingsys === "padlofutes") add("Vizes padlófűtés (rendszer + szerelés)", RENO.underfloorPerM2 * A + RENO.underfloorFixed, "heatsys");
+    else if (sel.heatingsys === "hoszivattyu") add("Hőszivattyús fűtési rendszer (komplett)", RENO.heatpumpSystem, "heatsys");
 
     // REFINE - air conditioning.
-    if (sel.klima === "igen") add("Klíma (beltéri egység, szereléssel)", RENO.klimaEach);
+    if (sel.klima === "igen") add("Klíma (beltéri egység, szereléssel)", RENO.klimaEach, "klima");
 
-    // REFINE - exterior works (family house only). Areas estimated from floor area.
-    if (pt === "haz" && sel.exterior && sel.exterior !== "nincs" && sel.exterior !== "nem_tudom") {
-        const e = RENO.exterior;
-        const ex = sel.exterior;
-        if (ex === "homlokzat" || ex === "homlokzat_teto" || ex === "teljes") add("Homlokzati hőszigetelés", e.facadePerM2[tier] * A * e.facadeFactor);
-        if (ex === "teto" || ex === "homlokzat_teto" || ex === "teljes") add("Tetőfelújítás", e.roofPerM2 * A * e.roofFactor);
-        if (ex === "teljes") { add("Térkövezés", e.pavingPerM2 * e.pavingDefault); add("Kerítés, kapu", e.fencePerM * e.fenceDefault); }
-    }
-
-    return finalize(items, A, pt === "haz" ? RENO.bandHouse : RENO.band);
+    return finalize(items, A);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,19 +535,19 @@ function buildKitchen(sel) {
     const tier = validTier(sel.tier);
     const k = RENO.kitchen;
     const items = [];
-    const add = (label, huf) => { if (huf > 0) items.push({ label, huf: round1000(huf) }); };
+    const add = (label, huf, kind) => { if (huf > 0) items.push(makeItem(label, huf, kind)); };
 
-    add("Bontás, burkolás, gépészet- és villanykiállás, padló, festés", k.base[tier] * A + k.fixed);
+    add("Bontás, burkolás, gépészet- és villanykiállás, padló, festés", k.base[tier] * A + k.fixed, "shell");
     if (sel.furniture === "igen") {
         // Cabinets + worktop scale with RUNNING METRES (folyóméter), the accurate
         // driver - not floor m². Unknown → ~4 fm (a typical kitchen run).
         const fm = KITCHEN_FM_METRES[sel.kitchen_fm] || 4;
-        add(`Konyhabútor és munkalap (${String(fm).replace(".", ",")} fm)`, (k.furniturePerM[tier] + k.countertopPerM[tier]) * fm);
+        add(`Konyhabútor és munkalap (${String(fm).replace(".", ",")} fm)`, (k.furniturePerM[tier] + k.countertopPerM[tier]) * fm, "kitchen");
     }
-    if (sel.appliances === "igen") add("Beépített gépek (sütő, főzőlap, páraelszívó stb.)", k.appliances[tier]);
-    if (sel.layout === "athelyez") add("Víz/gáz/villany pontok áthelyezése", k.moveExtra);
+    if (sel.appliances === "igen") add("Beépített gépek (sütő, főzőlap, páraelszívó stb.)", k.appliances[tier], "kitchen");
+    if (sel.layout === "athelyez") add("Víz/gáz/villany pontok áthelyezése (vízkiállás)", k.moveExtra, "plumbing");
 
-    return finalize(items, A, RENO.band);
+    return finalize(items, A);
 }
 // Kitchen cabinet run length (folyóméter) per stored token.
 const KITCHEN_FM_METRES = { fm_2_3: 2.5, fm_3_4: 3.5, fm_4_5: 4.5, fm_5_6: 5.5, fm_6p: 7, nem_tudom: 4 };
@@ -483,18 +561,18 @@ function buildRoom(sel) {
     const rs = ["festes", "festes_padlo", "teljes"].includes(sel.roomscope) ? sel.roomscope : "teljes";
     const c = RENO.cosmetic;
     const items = [];
-    const add = (label, huf) => { if (huf > 0) items.push({ label, huf: round1000(huf) }); };
+    const add = (label, huf, kind) => { if (huf > 0) items.push(makeItem(label, huf, kind)); };
 
-    add("Előkészítés, takarítás", c.fixed);
-    add("Festés, glettelés", c.paint[tier] * A);
-    if (rs === "festes_padlo" || rs === "teljes") add("Új padló (anyag + munka)", c.floor[tier] * A);
+    add("Előkészítés, takarítás", c.fixed, "shell");
+    add("Festés, glettelés", c.paint[tier] * A, "paint");
+    if (rs === "festes_padlo" || rs === "teljes") add("Új padló (anyag + munka)", c.floor[tier] * A, "floor");
     if (rs === "teljes") {
-        add("Villany frissítés (lámpák, kapcsolók, dugaljak)", c.elec[tier] * A);
-        add("Beltéri ajtó (1 db)", RENO.door[tier]);
-        add("Apró javítások", c.patch[tier] * A);
+        add("Villany frissítés (lámpák, kapcsolók, dugaljak)", c.elec[tier] * A, "electrical");
+        add("Beltéri ajtó (1 db)", RENO.door[tier], "doors");
+        add("Apró javítások", c.patch[tier] * A, "shell");
     }
 
-    return finalize(items, A, RENO.band);
+    return finalize(items, A);
 }
 
 // Dispatch to the right pricing engine by project type. No projectType (or
@@ -510,7 +588,7 @@ function buildQuote(sel) {
 }
 
 // Exported for unit testing the pricing math (no effect in production).
-export { buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface };
+export { buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget };
 
 // ---------------------------------------------------------------------------
 //  FLOW CONFIG - every project type asks its OWN question set. The backend drives
@@ -525,7 +603,10 @@ export { buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, area
 // matters if the customer wants new furniture), so this takes the state too.
 function projectFields(pt, sel = {}) {
     switch (pt) {
-        case "furdo":  return ["size", "tier", "washing", "layout", "heating"];
+        // Épített (csempézett) zuhanyzó alá nem kerül elektromos padlófűtés, ezért
+        // azt a kérdést ilyenkor kihagyjuk.
+        case "furdo":  return ["size", "tier", "washing", "layout",
+            ...(sel.washing === "zuhany" ? [] : ["heating"])];
         case "lakas":  return ["size", "scope", "tier", "bathrooms", "kitchen"];
         case "haz":    return ["size", "scope", "tier", "bathrooms", "kitchen"];
         case "konyha": return ["size", "tier", "furniture",
@@ -539,7 +620,7 @@ function projectFields(pt, sel = {}) {
 // the price honest (low), and answering only ever ADDS the things they actually want.
 function refineFields(pt) {
     if (pt === "lakas") return ["walls", "condition", "floortile", "windows", "heatingsys", "klima"];
-    if (pt === "haz")   return ["walls", "condition", "floortile", "windows", "heatingsys", "klima", "exterior"];
+    if (pt === "haz")   return ["walls", "condition", "floortile", "windows", "heatingsys", "klima"];
     return [];
 }
 const hasRefine = (pt) => refineFields(pt).length > 0;
@@ -599,12 +680,74 @@ const BUDGET = {
         buckets: [[10_000_000, "b_10m"], [20_000_000, "b_10_20"], [35_000_000, "b_20_35"], [Infinity, "b_35m"]],
     },
 };
+const BUDGET_UNSURE_LABEL = "Még nem tudom";
+
+// Round a Ft amount to a "nice" round million figure for a budget chip label.
+function niceMillion(ft) {
+    const m = ft / 1_000_000;
+    const step = m < 10 ? 0.5 : m < 30 ? 1 : 5;
+    return Math.max(step, Math.round(m / step) * step);
+}
+const fmtM = (m) => (Number.isInteger(m) ? String(m) : m.toFixed(1).replace(".", ","));
+
+// ADAPTIVE budget bands. Instead of a fixed per-type list, the offered amounts are
+// sized from the running ballpark computed from what the customer has ALREADY told
+// us (size, scope/tier, fixtures, ...). So a small basic job and a big premium one
+// never see the same options - the bands bracket the deterministic estimate. Falls
+// back to the fixed per-type scale only if the ballpark can't be computed yet.
+function budgetBandsFor(sel) {
+    let center = null;
+    try {
+        const pt = sel && sel.projectType;
+        const filled = (k) => sel[k] != null && String(sel[k]).trim() !== "";
+        if (pt && projectFields(pt, sel).every(filled)) center = buildQuote(sel).total;
+    } catch (e) { center = null; }
+
+    if (!center || !isFinite(center) || center <= 0) {
+        const sc = budgetScale(sel && sel.projectType);
+        return { adaptive: false, chips: BUDGET[sc].chips, scale: sc };
+    }
+
+    const t1 = niceMillion(center * 0.85);
+    let t2 = niceMillion(center * 1.05);
+    let t3 = niceMillion(center * 1.35);
+    const bump = (m) => m + (m < 10 ? 0.5 : m < 30 ? 1 : 5);
+    if (t2 <= t1) t2 = bump(t1);
+    if (t3 <= t2) t3 = bump(t2);
+
+    const chips = [
+        `${fmtM(t1)} millió Ft alatt`,
+        `${fmtM(t1)}–${fmtM(t2)} millió Ft`,
+        `${fmtM(t2)}–${fmtM(t3)} millió Ft`,
+        `${fmtM(t3)} millió Ft felett`,
+        BUDGET_UNSURE_LABEL,
+    ];
+    return { adaptive: true, chips, thresholds: [t1 * 1e6, t2 * 1e6, t3 * 1e6] };
+}
+
+// Map a typed/clicked budget answer to the STORED value, given the adaptive bands.
+// We store the human-readable band label directly (no token), so the owner e-mail
+// shows exactly what the customer picked and the value is robust to model drift.
+function resolveBudget(answer, sel) {
+    const a = String(answer || "").trim();
+    if (!a) return null;
+    const b = budgetBandsFor(sel);
+    const hit = b.chips.find((c) => c.toLowerCase() === a.toLowerCase());
+    if (hit) return hit;
+    if (/m[eé]g nem tud/i.test(a)) return BUDGET_UNSURE_LABEL;
+    if (!b.adaptive) {
+        return BUDGET[b.scale].values[a.toLowerCase()] || bucketBudget(parseBudgetAmount(a), b.scale);
+    }
+    // Free-typed amount in adaptive mode: store the parsed sum itself.
+    const amt = parseBudgetAmount(a);
+    return amt != null && amt >= 50000 ? formatHuf(amt) : null;
+}
 
 // Quick-reply chip labels per fixed-choice field.
 const CHIP_LABELS = {
     projectType: ["Fürdőszoba", "Konyha", "Teljes lakás", "Családi ház", "Egy szoba"],
     tier: ["Alap / takarékos", "Közepes", "Prémium", "Nem tudom"],
-    washing: ["Zuhanytálca üveg fallal", "Zuhanykabin", "Kád", "Kád és zuhany", "Nem tudom"],
+    washing: ["Épített zuhanyzó (üveg fallal)", "Zuhanykabin", "Kád", "Kád és zuhany", "Nem tudom"],
     layout: ["Marad a mostani elrendezés", "Áthelyezzük", "Nem tudom"],
     heating: ["Kérek padlófűtést", "Nem szükséges", "Nem tudom"],
     scope: ["Teljes (mindent cserélünk)", "Részleges (felületek + néhány szakág)", "Kozmetikai (festés, burkolat)", "Nem tudom"],
@@ -613,7 +756,6 @@ const CHIP_LABELS = {
     kitchen: ["Új konyhabútorral", "Felújítás bútor nélkül", "Konyhát nem érinti", "Nem tudom"],
     windows: ["Igen, ablakcsere kell", "Nem, maradnak", "Nem tudom"],
     heatingsys: ["Marad a mostani", "Radiátorcsere", "Padlófűtés", "Hőszivattyús rendszer", "Nem tudom"],
-    exterior: ["Nincs külső munka", "Homlokzati szigetelés", "Tetőfelújítás", "Homlokzat + tető", "Teljes külső", "Nem tudom"],
     furniture: ["Igen, új bútor kell", "Nem, marad", "Nem tudom"],
     kitchen_fm: ["2–3 fm", "3–4 fm", "4–5 fm", "5–6 fm", "6 fm felett", "Nem tudom"],
     appliances: ["Igen, gépekkel", "Nem, saját gépek", "Nem tudom"],
@@ -621,7 +763,7 @@ const CHIP_LABELS = {
     // --- Refine stage ---
     refine_gate: ["Igen, pontosítsuk", "Most nem, köszönöm"],
     walls: ["Igen, falakat is mozgatunk", "Nem, maradnak a falak", "Nem tudom"],
-    condition: ["Újszerű (kevés bontás)", "Lakott (teljes bontás kell)", "Régi, elhasználódott", "Nem tudom"],
+    condition: ["Új építésű (15 évnél nem öregebb)", "Felújítandó (20 évnél öregebb)", "Régi, elhasználódott (30+ év)", "Nem tudom"],
     floortile: ["Inkább csempe", "Fele-fele", "Inkább laminált/parketta", "Nem tudom"],
     klima: ["Igen, kérek klímát", "Nem szükséges", "Nem tudom"],
 };
@@ -647,7 +789,7 @@ const SIZE_VALUES = {
 const CHOICE_VALUES = {
     projectType: { "fürdőszoba": "furdo", "konyha": "konyha", "teljes lakás": "lakas", "családi ház": "haz", "egy szoba": "szoba" },
     tier: { "alap / takarékos": "basic", "közepes": "mid", "prémium": "premium", "nem tudom": "nem_tudom" },
-    washing: { "zuhanytálca üveg fallal": "zuhany", "zuhanykabin": "zuhanykabin", "kád": "kad", "kád és zuhany": "mindketto", "nem tudom": "nem_tudom" },
+    washing: { "épített zuhanyzó (üveg fallal)": "zuhany", "zuhanykabin": "zuhanykabin", "kád": "kad", "kád és zuhany": "mindketto", "nem tudom": "nem_tudom" },
     layout: { "marad a mostani elrendezés": "marad", "áthelyezzük": "athelyez", "nem tudom": "nem_tudom" },
     heating: { "kérek padlófűtést": "igen", "nem szükséges": "nem", "nem tudom": "nem_tudom" },
     scope: { "teljes (mindent cserélünk)": "teljes", "részleges (felületek + néhány szakág)": "reszleges", "kozmetikai (festés, burkolat)": "kozmetikai", "nem tudom": "nem_tudom" },
@@ -656,7 +798,6 @@ const CHOICE_VALUES = {
     kitchen: { "új konyhabútorral": "uj", "felújítás bútor nélkül": "felujitas", "konyhát nem érinti": "nem", "nem tudom": "nem_tudom" },
     windows: { "igen, ablakcsere kell": "csere", "nem, maradnak": "marad", "nem tudom": "nem_tudom" },
     heatingsys: { "marad a mostani": "marad", "radiátorcsere": "radiator", "padlófűtés": "padlofutes", "hőszivattyús rendszer": "hoszivattyu", "nem tudom": "nem_tudom" },
-    exterior: { "nincs külső munka": "nincs", "homlokzati szigetelés": "homlokzat", "tetőfelújítás": "teto", "homlokzat + tető": "homlokzat_teto", "teljes külső": "teljes", "nem tudom": "nem_tudom" },
     furniture: { "igen, új bútor kell": "igen", "nem, marad": "nem", "nem tudom": "nem_tudom" },
     kitchen_fm: { "2–3 fm": "fm_2_3", "3–4 fm": "fm_3_4", "4–5 fm": "fm_4_5", "5–6 fm": "fm_5_6", "6 fm felett": "fm_6p", "nem tudom": "nem_tudom" },
     appliances: { "igen, gépekkel": "igen", "nem, saját gépek": "nem", "nem tudom": "nem_tudom" },
@@ -664,7 +805,7 @@ const CHOICE_VALUES = {
     // --- Refine stage ---
     refine_gate: { "igen, pontosítsuk": "yes", "most nem, köszönöm": "no" },
     walls: { "igen, falakat is mozgatunk": "igen", "nem, maradnak a falak": "nem", "nem tudom": "nem_tudom" },
-    condition: { "újszerű (kevés bontás)": "ujszeru", "lakott (teljes bontás kell)": "lakott", "régi, elhasználódott": "regi", "nem tudom": "nem_tudom" },
+    condition: { "új építésű (15 évnél nem öregebb)": "ujszeru", "felújítandó (20 évnél öregebb)": "lakott", "régi, elhasználódott (30+ év)": "regi", "nem tudom": "nem_tudom" },
     floortile: { "inkább csempe": "tobb_csempe", "fele-fele": "fele_fele", "inkább laminált/parketta": "tobb_laminalt", "nem tudom": "nem_tudom" },
     klima: { "igen, kérek klímát": "igen", "nem szükséges": "nem", "nem tudom": "nem_tudom" },
 };
@@ -673,7 +814,7 @@ const CHOICE_VALUES = {
 function chipsFor(field, sel) {
     const pt = sel && sel.projectType;
     if (field === "size") return SIZE_CHIPS[pt] || SIZE_CHIPS.furdo;
-    if (field === "budget") return BUDGET[budgetScale(pt)].chips;
+    if (field === "budget") return budgetBandsFor(sel).chips;
     return CHIP_LABELS[field] || [];
 }
 
@@ -772,10 +913,7 @@ function mapAnswer(field, answer, sel) {
         const n = parseArea(a);
         return n != null ? String(n) : null;
     }
-    if (field === "budget") {
-        const sc = budgetScale(pt);
-        return BUDGET[sc].values[a.toLowerCase()] || bucketBudget(parseBudgetAmount(a), sc);
-    }
+    if (field === "budget") return resolveBudget(a, sel);
     if (CHOICE_VALUES[field]) return CHOICE_VALUES[field][a.toLowerCase()] || null;
     if (CONTACT_FIELDS.includes(field)) return a;
     return null;
@@ -787,6 +925,14 @@ function extractData(text) {
     const m = text.match(/<!--DATA:(.*?)-->/s);
     if (!m) return null;
     try { return JSON.parse(m[1]); } catch (e) { return null; }
+}
+
+// Fields the BACKEND owns deterministically - the model must never set them, so we
+// strip them from every model-emitted DATA block. `budget` is computed/stored as an
+// adaptive band label here, so a stale model token can't clobber it across turns.
+function stripManaged(s) {
+    if (s && typeof s === "object") delete s.budget;
+    return s;
 }
 
 // Merge several state objects, keeping the last NON-EMPTY value per field. Makes
@@ -813,7 +959,7 @@ function nextChips(sel) {
 const LABELS = {
     projectType: { furdo: "Fürdőszoba", konyha: "Konyha", lakas: "Teljes lakás", haz: "Családi ház", szoba: "Egy szoba" },
     tier: { basic: "Alap / takarékos", mid: "Közepes", premium: "Prémium", nem_tudom: "Nem tudja (alap: közepes)" },
-    washing: { zuhany: "Zuhanytálca üveg fallal", zuhanykabin: "Zuhanykabin", kad: "Kád", mindketto: "Kád és zuhany", nem_tudom: "Nem tudja (alap: zuhanykabin)" },
+    washing: { zuhany: "Épített zuhanyzó (üveg fallal)", zuhanykabin: "Zuhanykabin", kad: "Kád", mindketto: "Kád és zuhany", nem_tudom: "Nem tudja (alap: zuhanykabin)" },
     layout: { marad: "Marad a mostani", athelyez: "Áthelyezés (új elrendezés)", nem_tudom: "Nem tudja (alap: marad)" },
     heating: { igen: "Igen, padlófűtéssel", nem: "Nem", nem_tudom: "Nem tudja (alap: nincs)" },
     scope: { teljes: "Teljes (gépészet, villany, minden)", reszleges: "Részleges (felületek + néhány szakág)", kozmetikai: "Kozmetikai (festés, burkolat)", nem_tudom: "Nem tudja (alap: részleges)" },
@@ -822,12 +968,11 @@ const LABELS = {
     kitchen: { uj: "Új konyhabútorral", felujitas: "Felújítás bútor nélkül", nem: "Konyhát nem érinti", nem_tudom: "Nem tudja" },
     windows: { csere: "Igen, ablakcsere", marad: "Nem, maradnak", nem_tudom: "Nem tudja (alap: marad)" },
     heatingsys: { marad: "Marad a mostani", radiator: "Radiátorcsere", padlofutes: "Padlófűtés", hoszivattyu: "Hőszivattyús rendszer", nem_tudom: "Nem tudja (alap: marad)" },
-    exterior: { nincs: "Nincs külső munka", homlokzat: "Homlokzati szigetelés", teto: "Tetőfelújítás", homlokzat_teto: "Homlokzat + tető", teljes: "Teljes külső", nem_tudom: "Nem tudja (alap: nincs)" },
     furniture: { igen: "Igen, új bútor", nem: "Nem, marad", nem_tudom: "Nem tudja" },
     kitchen_fm: { fm_2_3: "2–3 fm", fm_3_4: "3–4 fm", fm_4_5: "4–5 fm", fm_5_6: "5–6 fm", fm_6p: "6 fm felett", nem_tudom: "Nem tudja (~4 fm)" },
     appliances: { igen: "Igen, gépekkel", nem: "Nem, saját gépek", nem_tudom: "Nem tudja" },
     walls: { igen: "Igen, falmozgatás is", nem: "Nem, maradnak a falak", nem_tudom: "Nem tudja (alap: nem)" },
-    condition: { ujszeru: "Újszerű (kevés bontás)", lakott: "Lakott (teljes bontás)", regi: "Régi, elhasználódott", nem_tudom: "Nem tudja" },
+    condition: { ujszeru: "Új építésű (15 évnél nem öregebb)", lakott: "Felújítandó (20 évnél öregebb)", regi: "Régi, elhasználódott (30+ év)", nem_tudom: "Nem tudja" },
     floortile: { tobb_csempe: "Inkább csempe", fele_fele: "Fele-fele", tobb_laminalt: "Inkább laminált/parketta", nem_tudom: "Nem tudja" },
     klima: { igen: "Igen, klímával", nem: "Nem", nem_tudom: "Nem tudja (alap: nincs)" },
     refine_gate: { yes: "Igen", no: "Nem" },
@@ -853,7 +998,7 @@ function sizeLabel(size, pt) {
 
 // Choice fields with fixed tokens, validated against their allowed set below.
 const CHOICE_FIELDS = ["projectType", "tier", "washing", "layout", "heating", "scope",
-    "roomscope", "bathrooms", "kitchen", "windows", "heatingsys", "exterior",
+    "roomscope", "bathrooms", "kitchen", "windows", "heatingsys",
     "furniture", "kitchen_fm", "appliances", "walls", "condition", "floortile", "klima",
     "refine_gate", "budget", "timeline"];
 
@@ -881,7 +1026,8 @@ function summaryPairs(sel) {
     if (pt === "furdo") {
         p.push(["Zuhany / kád", lbl("washing", sel.washing)]);
         p.push(["Elrendezés", lbl("layout", sel.layout)]);
-        p.push(["Padlófűtés", lbl("heating", sel.heating)]);
+        // Épített zuhanyzó alá nem kerül padlófűtés - ilyenkor ezt jelezzük, nem "-".
+        p.push(["Padlófűtés", sel.washing === "zuhany" ? "Nem lehetséges (épített zuhanyzó)" : lbl("heating", sel.heating)]);
     } else if (pt === "lakas" || pt === "haz") {
         const has = (k) => sel[k] != null && String(sel[k]).trim() !== "";
         p.push(["Munka jellege", lbl("scope", sel.scope)]);
@@ -894,7 +1040,6 @@ function summaryPairs(sel) {
         if (has("windows")) p.push(["Ablakcsere", lbl("windows", sel.windows)]);
         if (has("heatingsys")) p.push(["Fűtés", lbl("heatingsys", sel.heatingsys)]);
         if (has("klima")) p.push(["Klíma", lbl("klima", sel.klima)]);
-        if (pt === "haz" && has("exterior")) p.push(["Külső munkák", lbl("exterior", sel.exterior)]);
     } else if (pt === "konyha") {
         p.push(["Új konyhabútor", lbl("furniture", sel.furniture)]);
         if (sel.furniture === "igen" && sel.kitchen_fm) p.push(["Bútor hossza", lbl("kitchen_fm", sel.kitchen_fm)]);
@@ -930,17 +1075,18 @@ function runningEstimate(sel) {
 function renderCustomerQuote(quote, sel) {
     const pt = sel.projectType || "furdo";
     const what = lbl("projectType", pt).toLowerCase();
-    const items = quote.items.map(i => `• ${i.label} - **${formatHuf(i.huf)}**`).join("\n");
+    const items = quote.items.map(i => `• ${i.label} - **kb. ${formatHuf(i.low)} – ${formatHuf(i.high)}**`).join("\n");
 
-    // Bubble 1 - the price (shown as a range), with a one-line context.
+    // Bubble 1 - the price (every line + the total shown as a "kb." range), with a
+    // one-line context. All amounts are NET (nettó) - no gross / VAT figure shown.
     const priceBubble = [
         `Köszönöm, ${sel.name || ""}! Íme az **előzetes árajánlata** egy **${sizeLabel(sel.size, pt)}**, **${lbl("tier", sel.tier).toLowerCase()}** ${what}ra.`,
         ``,
-        `**Tételek:**`,
+        `**Tételek (tájékoztató, kb. sávval):**`,
         items,
         ``,
-        `**Becsült végösszeg: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}**`,
-        `(bruttó, ÁFÁ-val, **kulcsrakész**)`,
+        `**Becsült végösszeg: kb. ${formatHuf(quote.low)} – ${formatHuf(quote.high)}**`,
+        `(nettó árak, **kulcsrakész**)`,
     ].join("\n");
 
     // Bubble 2 - what's included + the estimate caveat + the next steps. This is
@@ -980,12 +1126,17 @@ const PHONE = process.env.LEAD_PHONE || "+36 30 260 57 56";
 //  System prompt (Hungarian) - conversation + structured output contract
 // ---------------------------------------------------------------------------
 const SYSTEM_PROMPT = `SZEMÉLYISÉG
-Te az "NM Bau" digitális árajánló asszisztense vagy. Lakás- és házfelújítással foglalkozó kivitelező nevében beszélsz: fürdőszoba, konyha, teljes lakás, családi ház (kívül-belül) és egyes szobák felújítása. Kizárólag MAGYARUL válaszolj.
+Te az "NM Bau" digitális árajánló asszisztense vagy. Lakás- és házfelújítással foglalkozó kivitelező nevében beszélsz: fürdőszoba, konyha, teljes lakás, családi ház és egyes szobák felújítása. FONTOS: kizárólag BELSŐ munkát vállalunk - külső munkát (homlokzat, tető, kerítés, térkövezés) NEM. Kizárólag MAGYARUL válaszolj.
 
 HANGNEM
 - Udvarias, közvetlen, szakértő és tömör. Lehetőleg 40 szó alatt válaszolj.
 - Egyszerre EGY kérdést tegyél fel. Sose kérdezz több dolgot egyszerre.
-- Sose találgass árat és sose számolj - az árat a rendszer számolja ki a végén, sávban.
+- Sose találgass árat és sose számolj - az árat a rendszer számolja ki a végén, sávban. Az árak NETTÓ árak (ne emlegess bruttót/ÁFÁ-t).
+
+KÉRDÉSEK FOGADÁSA (fontos!)
+- Az ügyfél BÁRMIKOR kérdezhet tőled (pl. "mit jelent a kulcsrakész?", "mi van benne az árban?"). Bátorítsd erre: a 0. kérdés után tedd hozzá röviden, hogy "Közben bármit kérdezhet is."
+- Ha az ügyfél KÉRDEZ valamit (nem a feltett kérdésre válaszol), akkor a SAJÁT kérdésére felelj röviden és érthetően ELŐSZÖR, és csak UTÁNA, ugyanabban a válaszban tedd fel újra az aktuális adatgyűjtő kérdést. Ne hagyd figyelmen kívül a kérdését.
+- Légy adaptív a kerethez: ha az ügyfél megmondja, körülbelül mennyit szánna a felújításra, igazodj hozzá (pl. ehhez melyik kivitelezési szint passzol), de árat ne mondj.
 
 FORMÁZÁS (olvashatóság - NAGYON FONTOS)
 Írj jól SZKENNELHETŐEN, Markdown-formázással (a rendszer megjeleníti a **félkövért** és a "•" felsorolást):
@@ -1010,7 +1161,7 @@ projectType - **félkövér** fő kérdés: "Mit szeretne felújítani?", ALATTA
 • **Fürdőszoba**
 • **Konyha**
 • **Teljes lakás**
-• **Családi ház** – kívül-belül
+• **Családi ház** – belső felújítás
 • **Egy szoba / helyiség**
 Értékek: furdo | konyha | lakas | haz | szoba.
 
@@ -1019,9 +1170,9 @@ A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL
 === FÜRDŐSZOBA (furdo) ===
 1. size - "Körülbelül hány négyzetméteres a fürdőszoba?" (szám vagy gomb) → s_3_4|s_5_6|s_7_8|s_9_10|s_11p|<szám>|nem_tudom
 2. tier - "Milyen kivitelezési szintet szeretne?": • **Alap / takarékos** • **Közepes** • **Prémium** → basic|mid|premium|nem_tudom
-3. washing - "Zuhanyzót vagy kádat szeretne?": • **Zuhanytálca üveg fallal** • **Zuhanykabin** (kész, komplett) • **Kád** • **Kád és zuhany** → zuhany|zuhanykabin|kad|mindketto|nem_tudom
+3. washing - "Zuhanyzót vagy kádat szeretne?": • **Épített zuhanyzó** (csempézett, üveg fallal) • **Zuhanykabin** (kész, komplett) • **Kád** • **Kád és zuhany** → zuhany|zuhanykabin|kad|mindketto|nem_tudom
 4. layout - "Marad a mostani elrendezés, vagy áthelyeznénk a vizes pontokat?": • **Marad** • **Áthelyezés** → marad|athelyez|nem_tudom
-5. heating - "Szeretne elektromos padlófűtést?" (csempe alá fektetett fűtőszőnyeg) → igen|nem|nem_tudom
+5. heating - "Szeretne elektromos padlófűtést?" (csempe alá fektetett fűtőszőnyeg) → igen|nem|nem_tudom. FONTOS: **épített zuhanyzó** (washing=zuhany) esetén padlófűtés NEM lehetséges - ilyenkor ezt a kérdést NE tedd fel (a rendszer kihagyja).
 
 === KONYHA (konyha) ===
 1. size - "Körülbelül hány négyzetméteres a konyha?" (szám vagy gomb) → <szám>|nem_tudom
@@ -1039,7 +1190,7 @@ A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL
 5. kitchen - "A konyhával mi legyen?": • **Új konyhabútorral** • **Felújítás bútor nélkül** • **Konyhát nem érinti** → uj|felujitas|nem|nem_tudom
 
 === CSALÁDI HÁZ (haz) - ugyanaz az 5 alapkérdés, mint a lakásnál (size, scope, tier, bathrooms, kitchen) ===
-(A külső munkákat NE itt kérdezd - az a pontosító szakaszban jön.)
+(Külső munkát - homlokzat, tető, kerítés, térkövezés - NEM vállalunk, ezt NE kérdezd és NE ajánld.)
 
 === EGY SZOBA (szoba) ===
 1. size - "Hány négyzetméteres a helyiség?" (szám vagy gomb) → <szám>|nem_tudom
@@ -1047,7 +1198,7 @@ A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL
 3. tier - kivitelezési szint → basic|mid|premium|nem_tudom
 
 === MINDEN TÍPUSNÁL AZ ALAPKÉRDÉSEK UTÁN ===
-budget - "Nagyjából milyen összeget szánna a felújításra?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben - a gombokat a rendszer megjeleníti. A sávok TÍPUSFÜGGŐEK. Tokenek: fürdő/konyha/szoba b_1m|b_1_2|b_2_3|b_3m; lakás b_5m|b_5_10|b_10_15|b_15m; ház b_10m|b_10_20|b_20_35|b_35m; bizonytalan → b_unsure. FONTOS: fogadd el a választ és LÉPJ TOVÁBB - SOHA ne tedd fel újra ugyanazt a kérdést.
+budget - "Nagyjából mekkora keretet szánna rá?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben. FONTOS: a felkínált összeg-sávokat a RENDSZER állítja össze az ADDIG MEGADOTT válaszok (méret, munka mélysége, kivitelezési szint, szaniterek stb.) alapján - tehát egy kis alap munkánál kisebb, egy nagy prémiumnál nagyobb keretsávokat mutat. Ezt a mezőt a rendszer kezeli és tölti ki: a DATA blokkban a "budget" MINDIG maradjon üres string (""). Fogadd el a választ és LÉPJ TOVÁBB - SOHA ne tedd fel újra ugyanazt a kérdést.
 timeline - "Mikorra szeretné a kivitelezést?" → t_asap|t_month|t_halfyear|t_thisyear|t_unsure
 
 ELÉRHETŐSÉGEK - a budget és timeline UTÁN. Előttük rövid átvezető (pl. "Köszönöm! Hogy elküldhessük a személyre szabott árajánlatot, kérek még pár adatot."). Utána egyesével (szabad szöveg, NINCS gomb), és mondd meg RÖVIDEN, miért kéred:
@@ -1062,14 +1213,13 @@ refine_gate - **félkövér** fő kérdés: "Megvan az **előzetes ár**! Szeret
 - Ha "no": NE kérdezz többet, a rendszer lezárja és megmutatja a végső árat.
 - Ha "yes": tedd fel EGYESÉVEL az alábbi pontosító kérdéseket (mindegyik szűkíti az árat). Minden válasz után a rendszer frissíti az ársávot.
   walls - "Mozgatunk/építünk falakat, áthelyezünk vizes pontokat (WC, mosdó, konyha)?" → igen|nem|nem_tudom
-  condition - "Milyen most az ingatlan állapota?": • **Újszerű** (kevés bontás) • **Lakott** (teljes bontás kell) • **Régi, elhasználódott** → ujszeru|lakott|regi|nem_tudom
+  condition - "Milyen most az ingatlan állapota?": • **Új építésű** (15 évnél nem öregebb) • **Felújítandó** (20 évnél öregebb) • **Régi, elhasználódott** (30+ év) → ujszeru|lakott|regi|nem_tudom
   floortile - "A padló nagyrészt csempe vagy laminált/parketta lesz?": • **Inkább csempe** • **Fele-fele** • **Inkább laminált/parketta** → tobb_csempe|fele_fele|tobb_laminalt|nem_tudom
   windows - "Kell ablakcsere (nyílászárócsere)?" → csere|marad|nem_tudom
   heatingsys - "Fűtéskorszerűsítés?": • **Marad a mostani** • **Radiátorcsere** • **Padlófűtés** • **Hőszivattyús rendszer** → marad|radiator|padlofutes|hoszivattyu|nem_tudom
   klima - "Kér klímát?" → igen|nem|nem_tudom
-  exterior - CSAK CSALÁDI HÁZNÁL: "Kell-e külső munka?": • **Nincs** • **Homlokzati szigetelés** • **Tetőfelújítás** • **Homlokzat + tető** • **Teljes külső** → nincs|homlokzat|teto|homlokzat_teto|teljes|nem_tudom
 
-MEGJEGYZÉS: A bontást, vízszigetelést, gépészetet, villanyszerelést, festést és a törmelékelszállítást NE kérdezd meg külön - ezek a kulcsrakész ajánlatban benne vannak.
+MEGJEGYZÉS: A bontást, vízszigetelést, gépészetet, villanyszerelést, festést és a törmelékelszállítást NE kérdezd meg külön - ezek a kulcsrakész ajánlatban benne vannak. Külső (homlokzat, tető, kerítés, térkövezés) munkát NEM vállalunk - ezt NE kérdezd és NE ajánld.
 
 SZABÁLYOK
 - Az ügyfél írhat szabad szöveggel is - értelmezd a válaszát és rendeld hozzá a megfelelő értéket.
@@ -1080,8 +1230,8 @@ SZABÁLYOK
 
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett vagy az adott típushoz nem tartozó mezők értéke üres string (""). SOSE találgass - csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
-<!--DATA:{"projectType":"","size":"","tier":"","washing":"","layout":"","heating":"","scope":"","roomscope":"","bathrooms":"","kitchen":"","windows":"","heatingsys":"","exterior":"","furniture":"","kitchen_fm":"","appliances":"","walls":"","condition":"","floortile":"","klima":"","refine_gate":"","budget":"","timeline":"","name":"","email":"","phone":"","postal_code":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|konyha|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; kitchen: uj|felujitas|nem|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; exterior: nincs|homlokzat|teto|homlokzat_teto|teljes|nem_tudom; furniture: igen|nem|nem_tudom; kitchen_fm: fm_2_3|fm_3_4|fm_4_5|fm_5_6|fm_6p|nem_tudom; appliances: igen|nem|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: b_1m|b_1_2|b_2_3|b_3m|b_5m|b_5_10|b_10_15|b_15m|b_10m|b_10_20|b_20_35|b_35m|b_unsure; timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
+<!--DATA:{"projectType":"","size":"","tier":"","washing":"","layout":"","heating":"","scope":"","roomscope":"","bathrooms":"","kitchen":"","windows":"","heatingsys":"","furniture":"","kitchen_fm":"","appliances":"","walls":"","condition":"","floortile":"","klima":"","refine_gate":"","budget":"","timeline":"","name":"","email":"","phone":"","postal_code":""}-->
+A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|konyha|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; kitchen: uj|felujitas|nem|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; furniture: igen|nem|nem_tudom; kitchen_fm: fm_2_3|fm_3_4|fm_4_5|fm_5_6|fm_6p|nem_tudom; appliances: igen|nem|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: MINDIG üres string "" (a rendszer kezeli); timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") - és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 A választógombokat a rendszer automatikusan megjeleníti - neked nem kell gombokat kiírnod.`;
 
@@ -1153,25 +1303,57 @@ async function callGemini(messages) {
 //  Handler
 // ---------------------------------------------------------------------------
 export default async function handler(request, response) {
-    response.setHeader("Access-Control-Allow-Origin", "*");
-    response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    applyCors(request, response);
 
-    if (request.method === "OPTIONS") return response.status(200).end();
+    if (request.method === "OPTIONS") return response.status(204).end();
+    // This is a JSON POST API - reject everything else outright.
+    if (request.method !== "POST") return response.status(405).json({ answer: "Method Not Allowed" });
+
+    const ip = clientIp(request);
 
     try {
-        const { question, history, action, lead, state } = request.body || {};
+        const { question, history, action, lead } = request.body || {};
 
         // --- ACTION: customer asked us to e-mail them the quote ---
-        if (action === "email_customer" && lead?.sel && lead?.quote) {
-            const ok = await sendQuoteEmail(lead.sel, lead.quote, { to: lead.sel.email, toCustomer: true });
+        // SECURITY: the client sends back the whole `lead`, so we trust NOTHING in
+        // it. We re-validate the state, RECOMPUTE the quote server-side (never use
+        // client-supplied numbers/labels), validate the recipient, gate it behind
+        // EMAIL_OFFER, and rate-limit hard - so this can't become a spam relay.
+        if (action === "email_customer") {
+            if (!EMAIL_OFFER_ENABLED) {
+                return response.status(200).json({ answer: `Köszönjük! Kollégánk hamarosan keresi Önt a részletekkel. ${PHONE}`, chips: [] });
+            }
+            const rl = rateLimit(`email:${ip}`, RL_EMAIL.limit, RL_EMAIL.windowMs);
+            if (!rl.ok) {
+                response.setHeader("Retry-After", String(rl.retryAfter));
+                return response.status(429).json({ answer: "Túl sok kérés. Kérjük, próbálja meg kicsit később.", chips: [] });
+            }
+            const sel = sanitizeChoices(stripManaged({ ...(lead && lead.sel) }));
+            // Only a complete, valid quote with a deliverable e-mail may be sent.
+            if (!isQuoteReady(sel) || emailIssue(sel.email)) {
+                return response.status(200).json({ answer: `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. ${PHONE}`, chips: [] });
+            }
+            const quote = buildQuote(sel); // recomputed, authoritative
+            const ok = await sendQuoteEmail(sel, quote, { to: sel.email, toCustomer: true });
             return response.status(200).json({
                 answer: ok
-                    ? `Elküldtük az árajánlatot a megadott e-mail címre (${lead.sel.email}). Ha nem találja, nézze meg a Spam mappát is.`
+                    ? `Elküldtük az árajánlatot a megadott e-mail címre (${esc(sel.email)}). Ha nem találja, nézze meg a Spam mappát is.`
                     : `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. ${PHONE}`,
                 chips: [],
             });
         }
+
+        // --- Per-IP rate limit + payload validation for the chat path (protects
+        // the paid LLM budget and blocks injected system turns / oversized bodies). ---
+        const rlChat = rateLimit(`chat:${ip}`, RL_CHAT.limit, RL_CHAT.windowMs);
+        if (!rlChat.ok) {
+            response.setHeader("Retry-After", String(rlChat.retryAfter));
+            return response.status(429).json({ answer: "Túl sok üzenet rövid idő alatt. Kérjük, várjon egy kicsit, és próbálja újra." });
+        }
+        const badInput = validateChatInput(question, history);
+        if (badInput) return response.status(400).json({ answer: badInput });
+
+        const { state } = request.body || {};
 
         // --- EARLY CONTACT CHECK: if the customer is answering a contact field,
         // validate it BEFORE spending a model call. On a bad value we keep the
@@ -1179,7 +1361,7 @@ export default async function handler(request, response) {
         // a rejected phone/e-mail bleeding into the NEXT field. ---
         {
             const priorSel = Array.isArray(history)
-                ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => extractData(m.content))
+                ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => stripManaged(extractData(m.content)))
                 : [];
             const baseSel = mergeState(state, ...priorSel);
             const pend = pendingField(baseSel);
@@ -1236,14 +1418,14 @@ export default async function handler(request, response) {
         let currentSel = null;
         const dataMatch = aiAnswer.match(/<!--DATA:(.*?)-->/s);
         if (dataMatch) {
-            try { currentSel = sanitizeChoices(JSON.parse(dataMatch[1])); }
+            try { currentSel = stripManaged(sanitizeChoices(JSON.parse(dataMatch[1]))); }
             catch (e) { console.error("DATA parse fail:", e.message); }
             aiAnswer = aiAnswer.replace(/<!--DATA:.*?-->/s, "").trim();
         }
 
         // ... then merge it onto the accumulated state carried by the widget.
         const priorSel = Array.isArray(history)
-            ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => extractData(m.content))
+            ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => stripManaged(extractData(m.content)))
             : [];
         const baseSel = mergeState(state, ...priorSel);
 
@@ -1319,30 +1501,32 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         return false;
     }
 
+    // NB: all customer-supplied text (name/phone/e-mail/postal/budget) is HTML-
+    // escaped via esc() so a malicious value can't inject markup into the inbox.
     const itemRows = quote.items
-        .map(i => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${i.label}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${formatHuf(i.huf)}</td></tr>`)
+        .map(i => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${esc(i.label)}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">kb. ${formatHuf(i.low)} – ${formatHuf(i.high)}</td></tr>`)
         .join("");
 
     // Client-details block is only included in the owner's copy.
     const clientBlock = toCustomer ? "" : `
         <h3 style="margin:0 0 8px">Ügyfél adatai</h3>
-        <p style="margin:4px 0"><b>Név:</b> ${sel.name || "-"}</p>
-        <p style="margin:4px 0"><b>Telefon:</b> ${sel.phone || "-"}</p>
-        <p style="margin:4px 0"><b>E-mail:</b> ${sel.email || "-"}</p>
-        <p style="margin:4px 0"><b>Irányítószám:</b> ${sel.postal_code || "-"}</p>
-        <p style="margin:4px 0"><b>Tervezett keret:</b> ${lbl("budget", sel.budget)}</p>
-        <p style="margin:4px 0"><b>Tervezett kivitelezés:</b> ${lbl("timeline", sel.timeline)}</p>
+        <p style="margin:4px 0"><b>Név:</b> ${esc(sel.name) || "-"}</p>
+        <p style="margin:4px 0"><b>Telefon:</b> ${esc(sel.phone) || "-"}</p>
+        <p style="margin:4px 0"><b>E-mail:</b> ${esc(sel.email) || "-"}</p>
+        <p style="margin:4px 0"><b>Irányítószám:</b> ${esc(sel.postal_code) || "-"}</p>
+        <p style="margin:4px 0"><b>Tervezett keret:</b> ${esc(sel.budget) || "-"}</p>
+        <p style="margin:4px 0"><b>Tervezett kivitelezés:</b> ${esc(lbl("timeline", sel.timeline))}</p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`;
 
     const flow = FLOW_LABEL[sel.projectType] || "Felújítás";
-    const heading = toCustomer ? `Az Ön árajánlata - NM Bau ${flow}` : `Új árajánlat - NM Bau ${flow}`;
+    const heading = toCustomer ? `Az Ön árajánlata - NM Bau ${esc(flow)}` : `Új árajánlat - NM Bau ${esc(flow)}`;
     const intro = toCustomer
-        ? `<p style="margin:0 0 12px">Kedves ${sel.name || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:</p>`
+        ? `<p style="margin:0 0 12px">Kedves ${esc(sel.name) || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:</p>`
         : "";
 
     // Project summary rows, tailored to the project type (shared with the chat recap).
     const summaryRows = summaryPairs(sel)
-        .map(([k, v]) => `<p style="margin:4px 0"><b>${k}:</b> ${v}</p>`)
+        .map(([k, v]) => `<p style="margin:4px 0"><b>${esc(k)}:</b> ${esc(v)}</p>`)
         .join("");
 
     const html = `
@@ -1355,18 +1539,20 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <h3 style="margin:0 0 8px">A felújítás összefoglalása</h3>
         ${summaryRows}
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
-        <h3 style="margin:0 0 8px">Kalkulált árajánlat (kulcsrakész)</h3>
+        <h3 style="margin:0 0 8px">Kalkulált árajánlat (kulcsrakész, nettó)</h3>
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
-          <tr><td style="padding:10px 12px;font-weight:bold">Becsült végösszeg (sáv)</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${formatHuf(quote.low)} – ${formatHuf(quote.high)}</td></tr>
+          <tr><td style="padding:10px 12px;font-weight:bold">Becsült végösszeg (kb. sáv)</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">kb. ${formatHuf(quote.low)} – ${formatHuf(quote.high)}</td></tr>
         </table>
-        ${toCustomer ? "" : `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af">Fajlagos: ~${formatHuf(quote.perM2)}/m² (kisebb terület esetén magasabb a fix költségek miatt)</p>`}
-        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció, bruttó (ÁFÁ-val), kulcsrakész. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.${toCustomer ? " " + PHONE : ""}</p>
+        ${toCustomer ? "" : `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af">Fajlagos: ~${formatHuf(quote.perM2)}/m² nettó (kisebb terület esetén magasabb a fix költségek miatt)</p>`}
+        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció, nettó árakkal, kulcsrakész. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.${toCustomer ? " " + PHONE : ""}</p>
       </div>
     </div>`;
 
+    // Strip CR/LF from any user value used in the subject (header-injection guard).
+    const oneLine = (s) => String(s == null ? "" : s).replace(/[\r\n]+/g, " ").trim();
     const subject = toCustomer
         ? `Az Ön árajánlata - NM Bau - ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`
-        : `[ÚJ ÁRAJÁNLAT] ${flow} - ${sel.postal_code || ""} - ${sel.name || ""} - ${formatHuf(quote.low)}–${formatHuf(quote.high)}`;
+        : `[ÚJ ÁRAJÁNLAT] ${flow} - ${oneLine(sel.postal_code)} - ${oneLine(sel.name)} - ${formatHuf(quote.low)}–${formatHuf(quote.high)}`;
 
     try {
         const emailRes = await fetch("https://api.resend.com/emails", {

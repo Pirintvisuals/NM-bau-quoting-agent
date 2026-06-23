@@ -6,7 +6,21 @@
 const PROJECT_ID = process.env.POSTHOG_PROJECT_ID || "207574";
 const POSTHOG_API = process.env.POSTHOG_API_HOST || "https://eu.posthog.com";
 
+// Constant-time string compare so the token gate can't be brute-forced by timing.
+function safeEqual(a, b) {
+    a = String(a == null ? "" : a); b = String(b == null ? "" : b);
+    if (a.length !== b.length) return false;
+    let r = 0;
+    for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return r === 0;
+}
+
 export default async function handler(req, res) {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    if (req.method && req.method !== "GET") return res.status(405).json({ error: "Method Not Allowed" });
+
     const key = (process.env.POSTHOG_API_KEY || "").trim();
 
     if (!key) {
@@ -28,9 +42,11 @@ export default async function handler(req, res) {
     // send ?token=... that matches it. If it's not set, the page is open.
     const token = process.env.STATS_TOKEN;
     if (token) {
-        const given = (req.query && req.query.token) ||
+        let given = (req.query && req.query.token) ||
+            (req.headers && req.headers["x-stats-token"]) ||
             (req.url && req.url.split("token=")[1]) || "";
-        if (decodeURIComponent(given) !== token) {
+        try { given = decodeURIComponent(given); } catch (e) { /* keep raw */ }
+        if (!safeEqual(given, token)) {
             return res.status(401).json({ error: "Wrong or missing password." });
         }
     }

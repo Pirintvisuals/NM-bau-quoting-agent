@@ -58,9 +58,10 @@ upward — the survey then confirms.
 
 ## How the price is calculated
 
-All prices are **HUF, gross (ÁFA included), turnkey** (labour + materials +
-fixtures). The estimate is built bottom‑up into ~8–9 itemised lines, so the
-customer sees exactly what they're paying for:
+All prices are **HUF, net (nettó, ÁFA nélkül), turnkey** (labour + materials +
+fixtures). Every line — and the total — is shown as a realistic **"kb." range**
+(per‑trade width). The estimate is built bottom‑up into ~8–9 itemised lines, so
+the customer sees exactly what they're paying for:
 
 1. **Bontás, törmelékelszállítás, konténer** — demolition + debris
 2. **Aljzatkiegyenlítés és kétrétegű vízszigetelés** — screed + waterproofing

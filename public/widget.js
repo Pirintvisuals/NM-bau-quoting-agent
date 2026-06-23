@@ -331,8 +331,8 @@
     inputElement = document.createElement("input");
     inputElement.type = "text";
     inputElement.className = "faq-input-field";
-    inputElement.setAttribute("aria-label", "Írja be a válaszát");
-    inputElement.placeholder = "Írja be a válaszát…";
+    inputElement.setAttribute("aria-label", "Írja be a válaszát vagy kérdését");
+    inputElement.placeholder = "Írja be a válaszát – vagy kérdezzen bátran…";
     inputElement.autocomplete = "off";
 
     const sendBtn = document.createElement("button");
@@ -362,10 +362,14 @@
   }
 
   function renderMarkdown(text) {
-    const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    // Only allow safe URL schemes in links - blocks javascript:/data: injection
+    // even if a customer's own echoed text contains link markup.
+    const safeUrl = (u) => (/^(https?:\/\/|mailto:|tel:|\/|#)/i.test(u) ? u : "#");
     const inline = (s) =>
       esc(s)
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) =>
+          `<a href="${safeUrl(url.trim())}" target="_blank" rel="noopener noreferrer">${label}</a>`)
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 
     // Build clean block elements (bullets, headers, paragraphs) for readability.
@@ -521,9 +525,9 @@
     estimateBarEl.style.display = "flex";
     const val = estimateBarEl.querySelector(".faq-estimate-val");
     const note = estimateBarEl.querySelector(".faq-estimate-note");
-    const text = fmtRange(est.low, est.high);
+    const text = "kb. " + fmtRange(est.low, est.high);
     if (val) val.textContent = text;
-    if (note) note.textContent = est.partial ? "pontosítással szűkül" : "véglegesített sáv";
+    if (note) note.textContent = est.partial ? "pontosítással szűkül (nettó)" : "véglegesített sáv (nettó)";
     // Pulse the banner when the number changes (and it was already on screen) so
     // people SEE it move/tighten - the main reason they keep answering.
     if (wasVisible && text !== lastEstimateText) {

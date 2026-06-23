@@ -6,6 +6,18 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["server.js"],
       "port": 8888
+    },
+    {
+      "name": "uk-demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "serve", "C:\\Users\\pirin\\OneDrive\\Melékletek\\UK-demo", "-l", "5055"],
+      "port": 5055
+    },
+    {
+      "name": "kazan-widget",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\Users\\pirin\\OneDrive\\Melékletek\\kecskemet quoting agent\\server.js"],
+      "port": 8888
     }
   ]
 }

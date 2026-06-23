@@ -1,9 +1,11 @@
-// Calibration + market-envelope check for the bathroom pricing engine.
-// Run: node test-quote.mjs   (exits non-zero if any scenario drifts off-market)
+// Calibration check for the pricing engine.
+// Run: node test-quote.mjs   (exits non-zero if any scenario drifts out of band)
 //
-// The envelopes are the published 2025–2026 Hungarian ranges (Daibau, qjob,
-// ÉpítésKultúra, szakiweb). Small bathrooms legitimately exceed 250 000 Ft/m²
-// because fixed costs dominate, so the per-m² ceiling is size-dependent.
+// IMPORTANT: these envelopes are NM Bau's INTENDED price bands (NET / nettó,
+// premium-positioned), NOT generic published market ranges. The owner sets the
+// firm deliberately above the aggregator averages, so a small bathroom can land
+// well over 400 000 Ft/m² net. The bands below guard against accidental drift
+// from those intended targets when the MODEL/RENO numbers are edited.
 import { buildQuote } from './api/faq-agent.js';
 
 const fmt = (n) => Math.round(n).toLocaleString('hu-HU') + ' Ft';
@@ -17,55 +19,56 @@ const renoCases = [
     // a "közepes" customer lands on - should feel sensible, not alarming.
     { name: 'LAKÁS 60 m², közepes, RÉSZLEGES, 1 fürdő, új konyha (csak alapkérdések)',
       sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj' },
-      total: [4_500_000, 7_500_000], perM2: [80_000, 130_000] },
+      total: [6_200_000, 8_200_000], perM2: [100_000, 140_000] },
     // Same flat, but customer REFINED: added windows + radiator + walls + condition.
     { name: 'LAKÁS 60 m², közepes, RÉSZLEGES + pontosítva (falak, lakott, ablak, radiátor)',
       sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj',
              walls: 'igen', condition: 'lakott', floortile: 'fele_fele', windows: 'csere', heatingsys: 'radiator', klima: 'nem' },
-      total: [6_000_000, 9_500_000], perM2: [100_000, 170_000] },
+      total: [7_400_000, 9_800_000], perM2: [120_000, 165_000] },
     { name: 'LAKÁS 80 m², prémium, TELJES, 2 fürdő, új konyha, ablak, hőszivattyú, klíma',
       sel: { projectType: 'lakas', size: '80', tier: 'premium', scope: 'teljes', bathrooms: '2', kitchen: 'uj',
              walls: 'igen', condition: 'lakott', floortile: 'tobb_csempe', windows: 'csere', heatingsys: 'hoszivattyu', klima: 'igen' },
-      total: [18_000_000, 30_000_000], perM2: [220_000, 400_000] },
+      total: [24_000_000, 31_000_000], perM2: [300_000, 390_000] },
     { name: 'LAKÁS 50 m², alap, KOZMETIKAI, 1 fürdő, konyha nem (csak alapkérdések)',
       sel: { projectType: 'lakas', size: '50', tier: 'basic', scope: 'kozmetikai', bathrooms: '1', kitchen: 'nem' },
-      total: [1_000_000, 2_600_000], perM2: [25_000, 70_000] },
-    { name: 'HÁZ 110 m², közepes, TELJES + pontosítva, 2 fürdő, új konyha, ablak, radiátor, homlokzat+tető',
+      total: [1_700_000, 2_600_000], perM2: [33_000, 55_000] },
+    { name: 'HÁZ 110 m², közepes, TELJES + pontosítva, 2 fürdő, új konyha, ablak, radiátor',
       sel: { projectType: 'haz', size: '110', tier: 'mid', scope: 'teljes', bathrooms: '2', kitchen: 'uj',
-             walls: 'nem', condition: 'lakott', floortile: 'fele_fele', windows: 'csere', heatingsys: 'radiator', klima: 'nem', exterior: 'homlokzat_teto' },
-      total: [18_000_000, 32_000_000], perM2: [160_000, 320_000] },
+             walls: 'nem', condition: 'lakott', floortile: 'fele_fele', windows: 'csere', heatingsys: 'radiator', klima: 'nem' },
+      total: [16_000_000, 21_000_000], perM2: [140_000, 195_000] },
     { name: 'KONYHA 10 m², közepes, bútorral (4–5 fm), gépekkel, marad',
       sel: { projectType: 'konyha', size: '10', tier: 'mid', furniture: 'igen', kitchen_fm: 'fm_4_5', appliances: 'igen', layout: 'marad' },
-      total: [1_200_000, 2_400_000], perM2: [80_000, 260_000] },
+      total: [1_700_000, 2_400_000], perM2: [160_000, 250_000] },
     { name: 'SZOBA 15 m², közepes, teljes',
       sel: { projectType: 'szoba', size: '15', tier: 'mid', roomscope: 'teljes' },
-      total: [400_000, 950_000], perM2: [25_000, 75_000] },
+      total: [600_000, 1_000_000], perM2: [40_000, 70_000] },
     // Regional index: same Budapest flat should land ~8% over the same job rural.
     { name: 'LAKÁS 60 m² Budapest (1011) - közepes, részleges, új konyha',
       sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '1011' },
-      total: [5_000_000, 8_000_000], perM2: [85_000, 145_000] },
+      total: [6_800_000, 8_800_000], perM2: [110_000, 150_000] },
     { name: 'LAKÁS 60 m² vidék (4032 Debrecen) - közepes, részleges, új konyha',
       sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '4032' },
-      total: [4_200_000, 7_000_000], perM2: [75_000, 125_000] },
+      total: [5_900_000, 7_700_000], perM2: [95_000, 130_000] },
 ];
 
 const cases = [
+    // Intended NM Bau bands (net): a small bathroom floor sits ~2 M, a typical mid
+    // bath 2–3 M, a big or premium one up to ~5 M (owner target).
     { name: '4 m², basic, zuhanykabin, keep, no heat',
       sel: { size: 's_3_4', tier: 'basic', washing: 'zuhanykabin', layout: 'marad', heating: 'nem' },
-      // 4 m² alap kivitel: Daibau 4–5 m² ~0,75–1,5 M.
-      total: [800_000, 1_400_000], perM2: [200_000, 380_000] },
-    { name: '6 m², mid, walk-in shower, keep, no heat',
+      total: [1_600_000, 2_300_000], perM2: [450_000, 650_000] },
+    { name: '6 m², mid, épített zuhanyzó (no heat possible), keep',
       sel: { size: 's_5_6', tier: 'mid', washing: 'zuhany', layout: 'marad', heating: 'nem' },
-      total: [1_300_000, 2_200_000], perM2: [220_000, 360_000] },
+      total: [2_300_000, 3_200_000], perM2: [430_000, 580_000] },
     { name: '9 m², mid, bath+shower, move, underfloor heat',
       sel: { size: '9', tier: 'mid', washing: 'mindketto', layout: 'athelyez', heating: 'igen' },
-      total: [2_000_000, 3_000_000], perM2: [200_000, 330_000] },
-    { name: '6 m², premium, walk-in shower, move, heat',
-      sel: { size: 's_5_6', tier: 'premium', washing: 'zuhany', layout: 'athelyez', heating: 'igen' },
-      total: [2_400_000, 3_600_000], perM2: [300_000, 560_000] },
+      total: [3_200_000, 4_400_000], perM2: [360_000, 480_000] },
+    { name: '6 m², premium, bath+shower, move, heat',
+      sel: { size: 's_5_6', tier: 'premium', washing: 'mindketto', layout: 'athelyez', heating: 'igen' },
+      total: [3_400_000, 5_200_000], perM2: [600_000, 900_000] },
     { name: 'unknown everything (nem_tudom defaults)',
       sel: { size: 'nem_tudom', tier: 'nem_tudom', washing: 'nem_tudom', layout: 'nem_tudom', heating: 'nem_tudom' },
-      total: [1_200_000, 2_200_000], perM2: [220_000, 360_000] },
+      total: [2_200_000, 3_000_000], perM2: [450_000, 600_000] },
 ];
 
 let failures = 0;
