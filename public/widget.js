@@ -6,6 +6,133 @@
   const PHONE = "+36 30 260 57 56";
   const BRAND = "NM Bau";
 
+  // --- Language sync with the host site -----------------------------------
+  // The NM Bau site (assets/i18n.js) sets <html lang> and localStorage "nmlang"
+  // to hu|en|de when the visitor clicks the HU/EN/DE buttons. We read the same
+  // value so the chatbot speaks the site's language, and watch <html lang> to
+  // follow live switches with no extra click. An embed can also force a fixed
+  // language with window.NMBAU_CONFIG.lang = "en".
+  function normLang(l) {
+    l = String(l || "").toLowerCase().slice(0, 2);
+    return l === "en" || l === "de" ? l : "hu";
+  }
+  function detectLang() {
+    if (config.lang) return normLang(config.lang);
+    try { const s = localStorage.getItem("nmlang"); if (s) return normLang(s); } catch (e) {}
+    return normLang(document.documentElement.getAttribute("lang"));
+  }
+  let LANG = detectLang();
+
+  const STRINGS = {
+    hu: {
+      teasers: [
+        "Mennyibe kerül a felújításom?",
+        "Kérjen ingyenes árajánlatot 1 perc alatt!",
+        "Pár kérdés, és máris látja a várható árat.",
+        "Lakást, fürdőt vagy konyhát újítana fel?",
+        "Kíváncsi a felújítás reális árára?",
+        "Kulcsrakész felújítás - kérjen kalkulációt!",
+        "Teljes lakásfelújítást tervez? Számoljunk!",
+        "Fürdő, konyha, ház - mutatjuk az árát is!",
+        "Ingyenes helyszíni felmérés - kezdje itt!",
+        "Felújítana? Kérdezzen tőlünk bátran!",
+      ],
+      launcherAria: "Csevegés megnyitása - NM Bau",
+      bubbleClose: "Buborék bezárása",
+      chatClose: "Csevegés bezárása",
+      status: "Azonnal válaszol",
+      placeholder: "Írja be a válaszát – vagy kérdezzen bátran…",
+      inputAria: "Írja be a válaszát vagy kérdését",
+      dialogAria: "NM Bau árajánló asszisztens",
+      greeting: `Üdvözlöm az **${BRAND}** **felújítási** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.`,
+      kickoff: "Szeretnék árajánlatot egy felújításra.",
+      estLabel: "Becsült ár",
+      estPartial: "pontosítással szűkül (nettó)",
+      estFinal: "véglegesített sáv (nettó)",
+      approx: "kb.",
+      million: "millió Ft",
+      emailYes: "Kérem e-mailben is",
+      emailNo: "Köszönöm, nem",
+      declineMsg: "Rendben, köszönjük a megkeresést! Hamarosan keressük. Ha sürgős, hívjon: " + PHONE,
+      errGeneric: "Elnézést, hiba történt. Kérjük, próbálja újra később.",
+      errConnect: "Elnézést, nem sikerült kapcsolódni a szerverhez.",
+      emailSent: "Elküldtük az árajánlatot a megadott e-mail címre.",
+      emailFail: "Sajnos most nem sikerült e-mailt küldeni. Kérjük, próbálja később.",
+    },
+    en: {
+      teasers: [
+        "How much will my renovation cost?",
+        "Get a free quote in 1 minute!",
+        "A few questions and you'll see the likely price.",
+        "Renovating a flat, bathroom or kitchen?",
+        "Curious about a realistic renovation price?",
+        "Turnkey renovation - get a calculation!",
+        "Planning a full flat renovation? Let's calculate!",
+        "Bathroom, kitchen, house - we'll show the price too!",
+        "Free on-site survey - start here!",
+        "Renovating? Ask us anything!",
+      ],
+      launcherAria: "Open chat - NM Bau",
+      bubbleClose: "Close bubble",
+      chatClose: "Close chat",
+      status: "Replies instantly",
+      placeholder: "Type your answer – or ask us anything…",
+      inputAria: "Type your answer or question",
+      dialogAria: "NM Bau quote assistant",
+      greeting: `Welcome to the **${BRAND}** **renovation** quote assistant! Based on a few questions I'll prepare your **preliminary quote**.`,
+      kickoff: "I'd like a quote for a renovation.",
+      estLabel: "Estimated price",
+      estPartial: "narrows as you refine (net)",
+      estFinal: "finalised range (net)",
+      approx: "approx.",
+      million: "million Ft",
+      emailYes: "Yes, e-mail it to me",
+      emailNo: "No, thanks",
+      declineMsg: "Alright, thank you for reaching out! We'll be in touch soon. If it's urgent, call: " + PHONE,
+      errGeneric: "Sorry, something went wrong. Please try again later.",
+      errConnect: "Sorry, we couldn't connect to the server.",
+      emailSent: "We've sent the quote to the e-mail address provided.",
+      emailFail: "Sorry, we couldn't send the e-mail right now. Please try again later.",
+    },
+    de: {
+      teasers: [
+        "Was kostet meine Renovierung?",
+        "Holen Sie sich in 1 Minute ein kostenloses Angebot!",
+        "Ein paar Fragen und Sie sehen den voraussichtlichen Preis.",
+        "Wohnung, Bad oder Küche renovieren?",
+        "Neugierig auf einen realistischen Renovierungspreis?",
+        "Schlüsselfertige Renovierung - jetzt kalkulieren!",
+        "Komplette Wohnungsrenovierung geplant? Rechnen wir!",
+        "Bad, Küche, Haus - wir zeigen auch den Preis!",
+        "Kostenlose Vor-Ort-Besichtigung - hier starten!",
+        "Renovieren? Fragen Sie uns alles!",
+      ],
+      launcherAria: "Chat öffnen - NM Bau",
+      bubbleClose: "Blase schließen",
+      chatClose: "Chat schließen",
+      status: "Antwortet sofort",
+      placeholder: "Geben Sie Ihre Antwort ein – oder fragen Sie uns…",
+      inputAria: "Geben Sie Ihre Antwort oder Frage ein",
+      dialogAria: "NM Bau Angebotsassistent",
+      greeting: `Willkommen beim **${BRAND}** **Renovierungs**-Angebotsassistenten! Anhand einiger Fragen erstelle ich Ihr **vorläufiges Angebot**.`,
+      kickoff: "Ich hätte gerne ein Angebot für eine Renovierung.",
+      estLabel: "Geschätzter Preis",
+      estPartial: "wird durch Angaben enger (netto)",
+      estFinal: "endgültige Spanne (netto)",
+      approx: "ca.",
+      million: "Mio. Ft",
+      emailYes: "Ja, bitte per E-Mail",
+      emailNo: "Nein, danke",
+      declineMsg: "In Ordnung, danke für Ihre Anfrage! Wir melden uns bald. Bei dringenden Fällen rufen Sie an: " + PHONE,
+      errGeneric: "Entschuldigung, etwas ist schiefgelaufen. Bitte versuchen Sie es später erneut.",
+      errConnect: "Entschuldigung, die Verbindung zum Server ist fehlgeschlagen.",
+      emailSent: "Wir haben das Angebot an die angegebene E-Mail-Adresse gesendet.",
+      emailFail: "Leider konnten wir die E-Mail gerade nicht senden. Bitte versuchen Sie es später erneut.",
+    },
+  };
+  function t() { return STRINGS[LANG] || STRINGS.hu; }
+  function curTeasers() { return t().teasers; }
+
   // --- Analytics (PostHog) -------------------------------------------------
   // Drop-in usage tracking. ALL events are tagged with `client` so a single
   // PostHog project gives you a per-client breakdown (this widget is embedded
@@ -84,22 +211,10 @@
 
   // Rotating teaser questions shown in the always-on bubble next to the launcher.
   // Varied angles (price, speed, specific trades, CTA) so it stays interesting
-  // and invites a click. Edit / add freely.
-  const TEASERS = [
-    "Mennyibe kerül a felújításom?",
-    "Kérjen ingyenes árajánlatot 1 perc alatt!",
-    "Pár kérdés, és máris látja a várható árat.",
-    "Lakást, fürdőt vagy konyhát újítana fel?",
-    "Kíváncsi a felújítás reális árára?",
-    "Kulcsrakész felújítás - kérjen kalkulációt!",
-    "Teljes lakásfelújítást tervez? Számoljunk!",
-    "Fürdő, konyha, ház - mutatjuk az árát is!",
-    "Ingyenes helyszíni felmérés - kezdje itt!",
-    "Felújítana? Kérdezzen tőlünk bátran!",
-  ];
+  // and invites a click. The actual text comes from STRINGS[LANG].teasers.
   const TEASER_ROTATE_MS = 9000; // how long each question stays before swapping
   const TEASER_DISMISS_KEY = "nmbau_teaser_dismissed";
-  let teaserIdx = Math.floor(Math.random() * TEASERS.length); // start varied
+  let teaserIdx = Math.floor(Math.random() * curTeasers().length); // start varied
   let teaserTimer = null;       // rotation interval
   // Once the user closes the bubble with ×, it stays gone - remembered across
   // page loads/visits via localStorage (falls back to in-memory if unavailable).
@@ -143,7 +258,7 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "faq-chat-launcher";
-    btn.setAttribute("aria-label", `Csevegés megnyitása - ${BRAND}`);
+    btn.setAttribute("aria-label", t().launcherAria);
     btn.innerHTML = `<span class="faq-launcher-ring" aria-hidden="true"></span>${ICON.chat}<span class="faq-launcher-dot" aria-hidden="true"></span>`;
     btn.onclick = toggleChat;
     container.appendChild(btn);
@@ -152,12 +267,12 @@
     tooltip.className = "faq-chat-tooltip";
     tooltip.setAttribute("role", "button");
     tooltip.setAttribute("tabindex", "0");
-    tooltip.innerHTML = `<span class="faq-tooltip-text">${TEASERS[teaserIdx]}</span>`;
+    tooltip.innerHTML = `<span class="faq-tooltip-text">${curTeasers()[teaserIdx % curTeasers().length]}</span>`;
 
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "faq-tooltip-close";
-    closeBtn.setAttribute("aria-label", "Buborék bezárása");
+    closeBtn.setAttribute("aria-label", t().bubbleClose);
     closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
     closeBtn.onclick = (e) => {
       e.stopPropagation();
@@ -190,8 +305,8 @@
     if (!textEl) return;
     tip.classList.add("swapping");
     setTimeout(() => {
-      teaserIdx = (teaserIdx + 1) % TEASERS.length;
-      textEl.textContent = TEASERS[teaserIdx];
+      teaserIdx = (teaserIdx + 1) % curTeasers().length;
+      textEl.textContent = curTeasers()[teaserIdx];
       tip.classList.remove("swapping");
       tip.classList.add("attention");
       setTimeout(() => tip.classList.remove("attention"), 650);
@@ -255,7 +370,7 @@
     chatWindow = document.createElement("div");
     chatWindow.className = "faq-chat-window";
     chatWindow.setAttribute("role", "dialog");
-    chatWindow.setAttribute("aria-label", `${BRAND} árajánló asszisztens`);
+    chatWindow.setAttribute("aria-label", t().dialogAria);
 
     // ---- Header ----
     const header = document.createElement("div");
@@ -270,7 +385,7 @@
     textBlock.className = "faq-header-text";
     textBlock.innerHTML =
       `<span class="faq-header-title">${BRAND}</span>` +
-      `<span class="faq-header-status"><span class="faq-status-dot" aria-hidden="true"></span>Azonnal válaszol</span>`;
+      `<span class="faq-header-status"><span class="faq-status-dot" aria-hidden="true"></span>${t().status}</span>`;
 
     const actions = document.createElement("div");
     actions.className = "faq-header-actions";
@@ -284,7 +399,7 @@
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "faq-header-close";
-    closeBtn.setAttribute("aria-label", "Csevegés bezárása");
+    closeBtn.setAttribute("aria-label", t().chatClose);
     closeBtn.innerHTML = ICON.close;
     closeBtn.onclick = toggleChat;
 
@@ -313,7 +428,7 @@
       "padding:10px 14px;background:#1C1917;color:#fff;border-bottom:2px solid #B8860B;" +
       "font-family:inherit;";
     estimateBarEl.innerHTML =
-      '<span style="font-size:12px;color:#D6D3D1">Becsült ár</span>' +
+      `<span style="font-size:12px;color:#D6D3D1">${t().estLabel}</span>` +
       '<span class="faq-estimate-val" style="font-size:15px;font-weight:700;color:#fff"></span>' +
       '<span class="faq-estimate-note" style="font-size:10px;color:#A8A29E;text-align:right;flex:0 0 auto"></span>';
 
@@ -331,8 +446,8 @@
     inputElement = document.createElement("input");
     inputElement.type = "text";
     inputElement.className = "faq-input-field";
-    inputElement.setAttribute("aria-label", "Írja be a válaszát vagy kérdését");
-    inputElement.placeholder = "Írja be a válaszát – vagy kérdezzen bátran…";
+    inputElement.setAttribute("aria-label", t().inputAria);
+    inputElement.placeholder = t().placeholder;
     inputElement.autocomplete = "off";
 
     const sendBtn = document.createElement("button");
@@ -356,8 +471,8 @@
     if (!started) {
       started = true;
       track("quote_started");
-      addMessage("bot", `Üdvözlöm az **${BRAND}** **felújítási** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.`);
-      sendMessage("Szeretnék árajánlatot egy felújításra.", true);
+      addMessage("bot", t().greeting);
+      sendMessage(t().kickoff, true);
     }
   }
 
@@ -419,14 +534,14 @@
     const yes = document.createElement("button");
     yes.type = "button";
     yes.className = "faq-chip faq-chip-primary";
-    yes.innerHTML = `${ICON.mail}<span>Kérem e-mailben is</span>`;
+    yes.innerHTML = `${ICON.mail}<span>${t().emailYes}</span>`;
     yes.onclick = () => { clearChips(); track("email_requested"); requestEmail(); };
 
-    const no = makeChip("Köszönöm, nem");
+    const no = makeChip(t().emailNo);
     no.onclick = () => {
       clearChips();
       track("email_declined");
-      addMessage("bot", "Rendben, köszönjük a megkeresést! Hamarosan keressük. Ha sürgős, hívjon: " + PHONE);
+      addMessage("bot", t().declineMsg);
     };
 
     wrap.appendChild(yes);
@@ -443,14 +558,14 @@
       const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "email_customer", lead: lastLead }),
+        body: JSON.stringify({ action: "email_customer", lead: lastLead, lang: LANG }),
       });
       removeThinking();
       const data = await res.json();
-      addMessage("bot", data.answer || "Elküldtük az árajánlatot a megadott e-mail címre.");
+      addMessage("bot", data.answer || t().emailSent);
     } catch (e) {
       removeThinking();
-      addMessage("bot", "Sajnos most nem sikerült e-mailt küldeni. Kérjük, próbálja később.");
+      addMessage("bot", t().emailFail);
     } finally {
       sending = false;
     }
@@ -509,7 +624,7 @@
   function fmtRange(low, high) {
     if (high >= 1000000) {
       const m = (n) => (Math.round(n / 100000) / 10).toLocaleString("hu-HU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-      return `${m(low)} – ${m(high)} millió Ft`;
+      return `${m(low)} – ${m(high)} ${t().million}`;
     }
     return `${fmtHuf(low)} – ${fmtHuf(high)}`;
   }
@@ -525,9 +640,9 @@
     estimateBarEl.style.display = "flex";
     const val = estimateBarEl.querySelector(".faq-estimate-val");
     const note = estimateBarEl.querySelector(".faq-estimate-note");
-    const text = "kb. " + fmtRange(est.low, est.high);
+    const text = t().approx + " " + fmtRange(est.low, est.high);
     if (val) val.textContent = text;
-    if (note) note.textContent = est.partial ? "pontosítással szűkül (nettó)" : "véglegesített sáv (nettó)";
+    if (note) note.textContent = est.partial ? t().estPartial : t().estFinal;
     // Pulse the banner when the number changes (and it was already on screen) so
     // people SEE it move/tighten - the main reason they keep answering.
     if (wasVisible && text !== lastEstimateText) {
@@ -569,13 +684,13 @@
       const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, history: conversationHistory, state: convState }),
+        body: JSON.stringify({ question: text, history: conversationHistory, state: convState, lang: LANG }),
       });
 
       removeThinking();
 
       if (!res.ok) {
-        addMessage("bot", "Elnézést, hiba történt. Kérjük, próbálja újra később.");
+        addMessage("bot", t().errGeneric);
         sending = false;
         return;
       }
@@ -633,7 +748,7 @@
     } catch (err) {
       console.error(err);
       removeThinking();
-      addMessage("bot", "Elnézést, nem sikerült kapcsolódni a szerverhez.");
+      addMessage("bot", t().errConnect);
     } finally {
       sending = false;
     }
@@ -655,11 +770,42 @@
     document.head.appendChild(s);
   }
 
+  // Re-apply the static UI text after a live language switch. Already-rendered
+  // chat bubbles stay as they were; every NEW question/answer arrives in the new
+  // language because sendMessage() sends the current LANG to the backend.
+  function applyLang() {
+    const next = detectLang();
+    if (next === LANG) return;
+    LANG = next;
+    const q = (sel) => document.querySelector(sel);
+    const launcher = q(".faq-chat-launcher");
+    if (launcher) launcher.setAttribute("aria-label", t().launcherAria);
+    const tipText = q(".faq-chat-tooltip .faq-tooltip-text");
+    if (tipText) tipText.textContent = curTeasers()[teaserIdx % curTeasers().length];
+    const status = q(".faq-header-status");
+    if (status) status.innerHTML = `<span class="faq-status-dot" aria-hidden="true"></span>${t().status}`;
+    if (inputElement) { inputElement.placeholder = t().placeholder; inputElement.setAttribute("aria-label", t().inputAria); }
+    if (chatWindow) chatWindow.setAttribute("aria-label", t().dialogAria);
+    const estLbl = estimateBarEl && estimateBarEl.querySelector("span");
+    if (estLbl) estLbl.textContent = t().estLabel;
+  }
+
+  // Watch the host site's language signal: <html lang> (set by assets/i18n.js on
+  // every HU/EN/DE click) and the localStorage write (covers other tabs).
+  function watchSiteLang() {
+    try {
+      const obs = new MutationObserver(applyLang);
+      obs.observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+    } catch (e) {}
+    window.addEventListener("storage", (e) => { if (!e || e.key === "nmlang") applyLang(); });
+  }
+
   function init() {
     initAnalytics();
     injectStyles();
     injectEstimateStyles();
     createLauncher();
+    watchSiteLang();
     // Fires once per page where the widget loads -> "how many people see it".
     track("widget_loaded");
   }

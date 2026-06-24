@@ -695,7 +695,8 @@ const fmtM = (m) => (Number.isInteger(m) ? String(m) : m.toFixed(1).replace(".",
 // us (size, scope/tier, fixtures, ...). So a small basic job and a big premium one
 // never see the same options - the bands bracket the deterministic estimate. Falls
 // back to the fixed per-type scale only if the ballpark can't be computed yet.
-function budgetBandsFor(sel) {
+function budgetBandsFor(sel, lang = "hu") {
+    const w = BUDGET_WORDS[normLang(lang)];
     let center = null;
     try {
         const pt = sel && sel.projectType;
@@ -705,7 +706,7 @@ function budgetBandsFor(sel) {
 
     if (!center || !isFinite(center) || center <= 0) {
         const sc = budgetScale(sel && sel.projectType);
-        return { adaptive: false, chips: BUDGET[sc].chips, scale: sc };
+        return { adaptive: false, chips: fixedBudgetChips(sc, lang), scale: sc };
     }
 
     const t1 = niceMillion(center * 0.85);
@@ -716,11 +717,11 @@ function budgetBandsFor(sel) {
     if (t3 <= t2) t3 = bump(t2);
 
     const chips = [
-        `${fmtM(t1)} millió Ft alatt`,
-        `${fmtM(t1)}–${fmtM(t2)} millió Ft`,
-        `${fmtM(t2)}–${fmtM(t3)} millió Ft`,
-        `${fmtM(t3)} millió Ft felett`,
-        BUDGET_UNSURE_LABEL,
+        w.under(fmtM(t1)),
+        w.range(fmtM(t1), fmtM(t2)),
+        w.range(fmtM(t2), fmtM(t3)),
+        w.over(fmtM(t3)),
+        w.unsure,
     ];
     return { adaptive: true, chips, thresholds: [t1 * 1e6, t2 * 1e6, t3 * 1e6] };
 }
@@ -728,17 +729,15 @@ function budgetBandsFor(sel) {
 // Map a typed/clicked budget answer to the STORED value, given the adaptive bands.
 // We store the human-readable band label directly (no token), so the owner e-mail
 // shows exactly what the customer picked and the value is robust to model drift.
-function resolveBudget(answer, sel) {
+function resolveBudget(answer, sel, lang = "hu") {
     const a = String(answer || "").trim();
     if (!a) return null;
-    const b = budgetBandsFor(sel);
+    const b = budgetBandsFor(sel, lang);
     const hit = b.chips.find((c) => c.toLowerCase() === a.toLowerCase());
-    if (hit) return hit;
-    if (/m[eé]g nem tud/i.test(a)) return BUDGET_UNSURE_LABEL;
-    if (!b.adaptive) {
-        return BUDGET[b.scale].values[a.toLowerCase()] || bucketBudget(parseBudgetAmount(a), b.scale);
-    }
-    // Free-typed amount in adaptive mode: store the parsed sum itself.
+    if (hit) return hit; // store the (localized) band label the customer picked
+    // "Not sure" in any of the three languages -> the localized unsure label.
+    if (/m[eé]g nem tud|not sure|wei(ß|ss) (noch )?nicht/i.test(a)) return BUDGET_WORDS[normLang(lang)].unsure;
+    // Free-typed amount: store the parsed sum itself (language-neutral).
     const amt = parseBudgetAmount(a);
     return amt != null && amt >= 50000 ? formatHuf(amt) : null;
 }
@@ -811,10 +810,15 @@ const CHOICE_VALUES = {
 };
 
 // Chips for a given field, in the current project-type context.
-function chipsFor(field, sel) {
+function chipsFor(field, sel, lang = "hu") {
+    const L = normLang(lang);
     const pt = sel && sel.projectType;
-    if (field === "size") return SIZE_CHIPS[pt] || SIZE_CHIPS.furdo;
-    if (field === "budget") return budgetBandsFor(sel).chips;
+    if (field === "size") {
+        if (L !== "hu" && SIZE_CHIPS_I18N[L] && SIZE_CHIPS_I18N[L][pt]) return SIZE_CHIPS_I18N[L][pt];
+        return SIZE_CHIPS[pt] || SIZE_CHIPS.furdo;
+    }
+    if (field === "budget") return budgetBandsFor(sel, L).chips;
+    if (L !== "hu" && CHIP_LABELS_I18N[L] && CHIP_LABELS_I18N[L][field]) return CHIP_LABELS_I18N[L][field];
     return CHIP_LABELS[field] || [];
 }
 
@@ -902,19 +906,21 @@ function postalIssue(pc) {
 // return the canonical value. Choice fields match the clicked chip label
 // (case-insensitive). Size accepts a per-type band chip OR a typed number. Budget
 // accepts a per-scale band OR a typed amount. Contact fields take the text as-is.
-function mapAnswer(field, answer, sel) {
+function mapAnswer(field, answer, sel, lang = "hu") {
     if (typeof answer !== "string" || !answer.trim()) return null;
     const a = answer.trim();
     const pt = sel && sel.projectType;
     if (field === "size") {
-        const map = SIZE_VALUES[pt] || SIZE_VALUES.furdo;
+        // Reverse map merged across HU/EN/DE, so a clicked chip resolves in any
+        // language; a free-typed number falls through to parseArea.
+        const map = SIZE_REVERSE[pt] || SIZE_REVERSE.furdo;
         const chip = map[a.toLowerCase()];
         if (chip) return chip;
         const n = parseArea(a);
         return n != null ? String(n) : null;
     }
-    if (field === "budget") return resolveBudget(a, sel);
-    if (CHOICE_VALUES[field]) return CHOICE_VALUES[field][a.toLowerCase()] || null;
+    if (field === "budget") return resolveBudget(a, sel, lang);
+    if (CHOICE_REVERSE[field]) return CHOICE_REVERSE[field][a.toLowerCase()] || null;
     if (CONTACT_FIELDS.includes(field)) return a;
     return null;
 }
@@ -949,9 +955,9 @@ function mergeState(...states) {
     return out;
 }
 
-function nextChips(sel) {
+function nextChips(sel, lang = "hu") {
     const f = pendingField(sel);
-    return f ? chipsFor(f, sel) : [];
+    return f ? chipsFor(f, sel, lang) : [];
 }
 
 // Human-readable Hungarian labels for the recap/e-mail. Fixed-token choice fields
@@ -984,16 +990,308 @@ const LABELS = {
     },
     timeline: { t_asap: "Amint lehet", t_month: "Egy hónapon belül", t_halfyear: "Fél éven belül", t_thisyear: "Még idén", t_unsure: "Még nem tudja" },
 };
-const lbl = (group, key) => (LABELS[group] && LABELS[group][key]) || key || "-";
+// ===========================================================================
+//  MULTI-LANGUAGE (HU / EN / DE)
+//  The whole pipeline runs on language-independent CANONICAL TOKENS (furdo,
+//  basic, zuhany, ...). Only the DISPLAY layer is translated here: the chip
+//  button labels, the recap labels, the budget/size band words and the
+//  customer-facing prose. Prices stay in Ft in every language. The owner's lead
+//  e-mail is always Hungarian (handled by calling these with lang="hu").
+// ===========================================================================
+const LANGS = ["hu", "en", "de"];
+function normLang(l) {
+    const s = String(l || "").toLowerCase().slice(0, 2);
+    return s === "en" || s === "de" ? s : "hu";
+}
+
+// --- Recap / e-mail token -> label, per language. Falls back to the Hungarian
+//     LABELS above for any missing entry. Same token keys as LABELS. ---
+const I18N_LABELS = {
+    en: {
+        projectType: { furdo: "Bathroom", konyha: "Kitchen", lakas: "Whole flat", haz: "Family house", szoba: "A single room" },
+        tier: { basic: "Basic / budget", mid: "Mid-range", premium: "Premium", nem_tudom: "Not sure (default: mid-range)" },
+        washing: { zuhany: "Walk-in shower (glass panel)", zuhanykabin: "Shower cabin", kad: "Bathtub", mindketto: "Bath and shower", nem_tudom: "Not sure (default: shower cabin)" },
+        layout: { marad: "Keep current", athelyez: "Relocate (new layout)", nem_tudom: "Not sure (default: keep)" },
+        heating: { igen: "Yes, with underfloor heating", nem: "No", nem_tudom: "Not sure (default: none)" },
+        scope: { teljes: "Full (plumbing, electrics, everything)", reszleges: "Partial (surfaces + some trades)", kozmetikai: "Cosmetic (paint, tiling)", nem_tudom: "Not sure (default: partial)" },
+        roomscope: { festes: "Painting only", festes_padlo: "Painting + new floor", teljes: "Full renovation", nem_tudom: "Not sure (default: full)" },
+        bathrooms: { "1": "1 bathroom/WC", "2": "2 bathrooms/WC", "3p": "3 or more", nem_tudom: "Not sure (default: 1)" },
+        kitchen: { uj: "With new kitchen units", felujitas: "Renovate without units", nem: "Kitchen not included", nem_tudom: "Not sure" },
+        windows: { csere: "Yes, replace windows", marad: "No, they stay", nem_tudom: "Not sure (default: keep)" },
+        heatingsys: { marad: "Keep current", radiator: "Replace radiators", padlofutes: "Underfloor heating", hoszivattyu: "Heat pump system", nem_tudom: "Not sure (default: keep)" },
+        furniture: { igen: "Yes, new units", nem: "No, they stay", nem_tudom: "Not sure" },
+        kitchen_fm: { fm_2_3: "2–3 rm", fm_3_4: "3–4 rm", fm_4_5: "4–5 rm", fm_5_6: "5–6 rm", fm_6p: "over 6 rm", nem_tudom: "Not sure (~4 rm)" },
+        appliances: { igen: "Yes, with appliances", nem: "No, own appliances", nem_tudom: "Not sure" },
+        walls: { igen: "Yes, moving walls too", nem: "No, walls stay", nem_tudom: "Not sure (default: no)" },
+        condition: { ujszeru: "Newly built (under 15 years)", lakott: "To be renovated (over 20 years)", regi: "Old, worn (30+ years)", nem_tudom: "Not sure" },
+        floortile: { tobb_csempe: "Mostly tiles", fele_fele: "Half and half", tobb_laminalt: "Mostly laminate/parquet", nem_tudom: "Not sure" },
+        klima: { igen: "Yes, with AC", nem: "No", nem_tudom: "Not sure (default: none)" },
+        refine_gate: { yes: "Yes", no: "No" },
+        budget: {
+            b_1m: "under 1 million Ft", b_1_2: "1–2 million Ft", b_2_3: "2–3 million Ft", b_3m: "over 3 million Ft",
+            b_5m: "under 5 million Ft", b_5_10: "5–10 million Ft", b_10_15: "10–15 million Ft", b_15m: "over 15 million Ft",
+            b_10m: "under 10 million Ft", b_10_20: "10–20 million Ft", b_20_35: "20–35 million Ft", b_35m: "over 35 million Ft",
+            b_unsure: "Not sure yet",
+        },
+        timeline: { t_asap: "As soon as possible", t_month: "Within a month", t_halfyear: "Within six months", t_thisyear: "Still this year", t_unsure: "Not sure yet" },
+    },
+    de: {
+        projectType: { furdo: "Badezimmer", konyha: "Küche", lakas: "Ganze Wohnung", haz: "Einfamilienhaus", szoba: "Ein Zimmer" },
+        tier: { basic: "Einfach / sparsam", mid: "Mittel", premium: "Premium", nem_tudom: "Weiß nicht (Standard: Mittel)" },
+        washing: { zuhany: "Gemauerte Dusche (Glaswand)", zuhanykabin: "Duschkabine", kad: "Badewanne", mindketto: "Wanne und Dusche", nem_tudom: "Weiß nicht (Standard: Duschkabine)" },
+        layout: { marad: "Bleibt", athelyez: "Verlegen (neue Anordnung)", nem_tudom: "Weiß nicht (Standard: bleibt)" },
+        heating: { igen: "Ja, mit Fußbodenheizung", nem: "Nein", nem_tudom: "Weiß nicht (Standard: keine)" },
+        scope: { teljes: "Komplett (Installation, Elektrik, alles)", reszleges: "Teilweise (Oberflächen + einige Gewerke)", kozmetikai: "Kosmetisch (Malern, Beläge)", nem_tudom: "Weiß nicht (Standard: teilweise)" },
+        roomscope: { festes: "Nur Malern", festes_padlo: "Malern + neuer Boden", teljes: "Komplette Renovierung", nem_tudom: "Weiß nicht (Standard: komplett)" },
+        bathrooms: { "1": "1 Bad/WC", "2": "2 Bäder/WC", "3p": "3 oder mehr", nem_tudom: "Weiß nicht (Standard: 1)" },
+        kitchen: { uj: "Mit neuen Küchenmöbeln", felujitas: "Renovieren ohne Möbel", nem: "Küche nicht betroffen", nem_tudom: "Weiß nicht" },
+        windows: { csere: "Ja, Fenstertausch", marad: "Nein, bleiben", nem_tudom: "Weiß nicht (Standard: bleibt)" },
+        heatingsys: { marad: "Bleibt", radiator: "Heizkörpertausch", padlofutes: "Fußbodenheizung", hoszivattyu: "Wärmepumpensystem", nem_tudom: "Weiß nicht (Standard: bleibt)" },
+        furniture: { igen: "Ja, neue Möbel", nem: "Nein, bleiben", nem_tudom: "Weiß nicht" },
+        kitchen_fm: { fm_2_3: "2–3 lfm", fm_3_4: "3–4 lfm", fm_4_5: "4–5 lfm", fm_5_6: "5–6 lfm", fm_6p: "über 6 lfm", nem_tudom: "Weiß nicht (~4 lfm)" },
+        appliances: { igen: "Ja, mit Geräten", nem: "Nein, eigene Geräte", nem_tudom: "Weiß nicht" },
+        walls: { igen: "Ja, auch Wände versetzen", nem: "Nein, Wände bleiben", nem_tudom: "Weiß nicht (Standard: nein)" },
+        condition: { ujszeru: "Neubau (unter 15 Jahre)", lakott: "Renovierungsbedürftig (über 20 Jahre)", regi: "Alt, abgenutzt (30+ Jahre)", nem_tudom: "Weiß nicht" },
+        floortile: { tobb_csempe: "Eher Fliesen", fele_fele: "Halb und halb", tobb_laminalt: "Eher Laminat/Parkett", nem_tudom: "Weiß nicht" },
+        klima: { igen: "Ja, mit Klimaanlage", nem: "Nein", nem_tudom: "Weiß nicht (Standard: keine)" },
+        refine_gate: { yes: "Ja", no: "Nein" },
+        budget: {
+            b_1m: "unter 1 Mio. Ft", b_1_2: "1–2 Mio. Ft", b_2_3: "2–3 Mio. Ft", b_3m: "über 3 Mio. Ft",
+            b_5m: "unter 5 Mio. Ft", b_5_10: "5–10 Mio. Ft", b_10_15: "10–15 Mio. Ft", b_15m: "über 15 Mio. Ft",
+            b_10m: "unter 10 Mio. Ft", b_10_20: "10–20 Mio. Ft", b_20_35: "20–35 Mio. Ft", b_35m: "über 35 Mio. Ft",
+            b_unsure: "Weiß noch nicht",
+        },
+        timeline: { t_asap: "So bald wie möglich", t_month: "Innerhalb eines Monats", t_halfyear: "Innerhalb von sechs Monaten", t_thisyear: "Noch dieses Jahr", t_unsure: "Weiß noch nicht" },
+    },
+};
+function lbl(group, key, lang = "hu") {
+    const L = normLang(lang);
+    if (L !== "hu" && I18N_LABELS[L] && I18N_LABELS[L][group] && I18N_LABELS[L][group][key] != null) return I18N_LABELS[L][group][key];
+    return (LABELS[group] && LABELS[group][key]) || key || "-";
+}
+
+// --- Chip button labels per language, SAME ORDER as the Hungarian CHIP_LABELS /
+//     CHOICE_VALUES, so the canonical token for index i is identical. ---
+const CHIP_LABELS_I18N = {
+    en: {
+        projectType: ["Bathroom", "Kitchen", "Whole flat", "Family house", "A single room"],
+        tier: ["Basic / budget", "Mid-range", "Premium", "Not sure"],
+        washing: ["Walk-in shower (glass panel)", "Shower cabin", "Bathtub", "Bath and shower", "Not sure"],
+        layout: ["Keep the current layout", "Relocate it", "Not sure"],
+        heating: ["Yes, underfloor heating", "Not needed", "Not sure"],
+        scope: ["Full (replace everything)", "Partial (surfaces + some trades)", "Cosmetic (paint, tiling)", "Not sure"],
+        roomscope: ["Painting only", "Painting + new floor", "Full renovation", "Not sure"],
+        bathrooms: ["1 bathroom/WC", "2 bathrooms/WC", "3 or more", "Not sure"],
+        kitchen: ["With new kitchen units", "Renovate without units", "Kitchen not included", "Not sure"],
+        windows: ["Yes, replace windows", "No, they stay", "Not sure"],
+        heatingsys: ["Keep the current one", "Replace radiators", "Underfloor heating", "Heat pump system", "Not sure"],
+        furniture: ["Yes, new units needed", "No, they stay", "Not sure"],
+        kitchen_fm: ["2–3 rm", "3–4 rm", "4–5 rm", "5–6 rm", "over 6 rm", "Not sure"],
+        appliances: ["Yes, with appliances", "No, my own appliances", "Not sure"],
+        timeline: ["As soon as possible", "Within a month", "Within six months", "Still this year", "Not sure yet"],
+        refine_gate: ["Yes, let's refine it", "Not now, thanks"],
+        walls: ["Yes, we'll move walls too", "No, walls stay", "Not sure"],
+        condition: ["Newly built (under 15 years)", "To be renovated (over 20 years)", "Old, worn (30+ years)", "Not sure"],
+        floortile: ["Mostly tiles", "Half and half", "Mostly laminate/parquet", "Not sure"],
+        klima: ["Yes, I'd like AC", "Not needed", "Not sure"],
+    },
+    de: {
+        projectType: ["Badezimmer", "Küche", "Ganze Wohnung", "Einfamilienhaus", "Ein Zimmer"],
+        tier: ["Einfach / sparsam", "Mittel", "Premium", "Weiß nicht"],
+        washing: ["Gemauerte Dusche (Glaswand)", "Duschkabine", "Badewanne", "Wanne und Dusche", "Weiß nicht"],
+        layout: ["Aktuelle Anordnung bleibt", "Wird verlegt", "Weiß nicht"],
+        heating: ["Ja, Fußbodenheizung", "Nicht nötig", "Weiß nicht"],
+        scope: ["Komplett (alles wird erneuert)", "Teilweise (Oberflächen + einige Gewerke)", "Kosmetisch (Malern, Beläge)", "Weiß nicht"],
+        roomscope: ["Nur Malern", "Malern + neuer Boden", "Komplette Renovierung", "Weiß nicht"],
+        bathrooms: ["1 Bad/WC", "2 Bäder/WC", "3 oder mehr", "Weiß nicht"],
+        kitchen: ["Mit neuen Küchenmöbeln", "Renovieren ohne Möbel", "Küche nicht betroffen", "Weiß nicht"],
+        windows: ["Ja, Fenstertausch", "Nein, bleiben", "Weiß nicht"],
+        heatingsys: ["Aktuelles bleibt", "Heizkörpertausch", "Fußbodenheizung", "Wärmepumpensystem", "Weiß nicht"],
+        furniture: ["Ja, neue Möbel", "Nein, bleiben", "Weiß nicht"],
+        kitchen_fm: ["2–3 lfm", "3–4 lfm", "4–5 lfm", "5–6 lfm", "über 6 lfm", "Weiß nicht"],
+        appliances: ["Ja, mit Geräten", "Nein, eigene Geräte", "Weiß nicht"],
+        timeline: ["So bald wie möglich", "Innerhalb eines Monats", "Innerhalb von sechs Monaten", "Noch dieses Jahr", "Weiß noch nicht"],
+        refine_gate: ["Ja, verfeinern", "Jetzt nicht, danke"],
+        walls: ["Ja, auch Wände versetzen", "Nein, Wände bleiben", "Weiß nicht"],
+        condition: ["Neubau (unter 15 Jahre)", "Renovierungsbedürftig (über 20 Jahre)", "Alt, abgenutzt (30+ Jahre)", "Weiß nicht"],
+        floortile: ["Eher Fliesen", "Halb und halb", "Eher Laminat/Parkett", "Weiß nicht"],
+        klima: ["Ja, mit Klimaanlage", "Nicht nötig", "Weiß nicht"],
+    },
+};
+// Localized SIZE chips (same order as SIZE_CHIPS). Only the "under/over/not sure"
+// words differ; the "N m²" numbers are language-neutral.
+const SIZE_CHIPS_I18N = {
+    en: {
+        furdo: ["3–4 m²", "5–6 m²", "7–8 m²", "9–10 m²", "over 10 m²", "Not sure"],
+        lakas: ["under 40 m²", "40–60 m²", "60–80 m²", "80–120 m²", "over 120 m²", "Not sure"],
+        haz: ["under 80 m²", "80–120 m²", "120–160 m²", "over 160 m²", "Not sure"],
+        konyha: ["under 6 m²", "6–10 m²", "10–15 m²", "over 15 m²", "Not sure"],
+        szoba: ["under 10 m²", "10–15 m²", "15–20 m²", "over 20 m²", "Not sure"],
+    },
+    de: {
+        furdo: ["3–4 m²", "5–6 m²", "7–8 m²", "9–10 m²", "über 10 m²", "Weiß nicht"],
+        lakas: ["unter 40 m²", "40–60 m²", "60–80 m²", "80–120 m²", "über 120 m²", "Weiß nicht"],
+        haz: ["unter 80 m²", "80–120 m²", "120–160 m²", "über 160 m²", "Weiß nicht"],
+        konyha: ["unter 6 m²", "6–10 m²", "10–15 m²", "über 15 m²", "Weiß nicht"],
+        szoba: ["unter 10 m²", "10–15 m²", "15–20 m²", "über 20 m²", "Weiß nicht"],
+    },
+};
+
+// Merged reverse lookup: ANY language's chip label (lowercased) -> canonical
+// token, so a customer who switches language mid-chat still resolves correctly.
+// Built by zipping each language's chip array against the HU token order.
+const CHOICE_REVERSE = {};
+for (const field of Object.keys(CHOICE_VALUES)) {
+    const map = {};
+    const tokens = Object.values(CHOICE_VALUES[field]); // HU chip order = token order
+    Object.assign(map, CHOICE_VALUES[field]); // HU labels already mapped
+    for (const L of ["en", "de"]) {
+        const arr = CHIP_LABELS_I18N[L] && CHIP_LABELS_I18N[L][field];
+        if (arr) arr.forEach((label, i) => { if (tokens[i] != null) map[label.toLowerCase()] = tokens[i]; });
+    }
+    CHOICE_REVERSE[field] = map;
+}
+const SIZE_REVERSE = {};
+for (const pt of Object.keys(SIZE_VALUES)) {
+    const map = {};
+    const tokens = Object.values(SIZE_VALUES[pt]);
+    Object.assign(map, SIZE_VALUES[pt]);
+    for (const L of ["en", "de"]) {
+        const arr = SIZE_CHIPS_I18N[L] && SIZE_CHIPS_I18N[L][pt];
+        if (arr) arr.forEach((label, i) => { if (tokens[i] != null) map[label.toLowerCase()] = tokens[i]; });
+    }
+    SIZE_REVERSE[pt] = map;
+}
+
+// Localized budget band words. Adaptive bands are built from these so a small
+// basic job and a big premium one show different amounts, in the right language.
+const BUDGET_WORDS = {
+    hu: { unit: "millió Ft", under: (s) => `${s} millió Ft alatt`, over: (s) => `${s} millió Ft felett`, range: (a, b) => `${a}–${b} millió Ft`, unsure: "Még nem tudom" },
+    en: { unit: "million Ft", under: (s) => `under ${s} million Ft`, over: (s) => `over ${s} million Ft`, range: (a, b) => `${a}–${b} million Ft`, unsure: "Not sure yet" },
+    de: { unit: "Mio. Ft", under: (s) => `unter ${s} Mio. Ft`, over: (s) => `über ${s} Mio. Ft`, range: (a, b) => `${a}–${b} Mio. Ft`, unsure: "Weiß noch nicht" },
+};
+// Fixed (non-adaptive) budget band thresholds in millions, per scale - used to
+// build localized fallback chips when the running ballpark isn't computable yet.
+const BUDGET_FIXED_M = { small: [1, 2, 3], flat: [5, 10, 15], house: [10, 20, 35] };
+function fixedBudgetChips(scale, lang = "hu") {
+    const w = BUDGET_WORDS[normLang(lang)];
+    const [a, b, c] = BUDGET_FIXED_M[scale] || BUDGET_FIXED_M.small;
+    return [w.under(a), w.range(a, b), w.range(b, c), w.over(c), w.unsure];
+}
 
 // Size label: bathroom band token → friendly band; free number → "N m²";
 // unknown → per-type default note.
 const SIZE_LABEL = { s_3_4: "3–4 m²", s_5_6: "5–6 m²", s_7_8: "7–8 m²", s_9_10: "9–10 m²", s_11p: "10 m² felett" };
-function sizeLabel(size, pt) {
-    if (size === "nem_tudom" || size == null || String(size).trim() === "") return `Nem tudja (alap: ${TYPE_DEFAULT_AREA[pt] || 5} m²)`;
+function sizeLabel(size, pt, lang = "hu") {
+    const L = normLang(lang);
+    if (size === "nem_tudom" || size == null || String(size).trim() === "") {
+        const A = TYPE_DEFAULT_AREA[pt] || 5;
+        if (L === "en") return `Not sure (default: ${A} m²)`;
+        if (L === "de") return `Weiß nicht (Standard: ${A} m²)`;
+        return `Nem tudja (alap: ${A} m²)`;
+    }
     if (Object.prototype.hasOwnProperty.call(SIZE_LABEL, size)) return SIZE_LABEL[size];
     const n = parseFloat(String(size).replace(",", "."));
     return !isNaN(n) && n > 0 ? `${String(size).replace(".", ",")} m²` : "-";
+}
+
+// ---------------------------------------------------------------------------
+//  Quote line-item label translation. buildQuote() always emits Hungarian item
+//  labels (so the pricing tests stay stable); when the customer's language is
+//  EN/DE we translate them HERE, at render time. Static phrases use an exact
+//  dictionary; the few labels that carry a dynamic count/length use regex rules.
+// ---------------------------------------------------------------------------
+const ITEM_LABELS_I18N = {
+    en: {
+        "Bontás, törmelékelszállítás, konténer": "Demolition, debris removal, skip",
+        "Aljzatkiegyenlítés és kétrétegű vízszigetelés": "Floor levelling and two-layer waterproofing",
+        "Burkolás munkadíja (fal + padló)": "Tiling labour (walls + floor)",
+        "Csempe és járólap (anyag)": "Wall and floor tiles (material)",
+        "Gépészet (víz- és lefolyóvezeték, bekötések)": "Plumbing (water and waste pipes, connections)",
+        "Villanyszerelés (világítás, csatlakozók, szellőztetés)": "Electrical work (lighting, sockets, ventilation)",
+        "Szaniterek és csaptelepek (anyag + beépítés)": "Sanitaryware and taps (material + installation)",
+        "Festés, glettelés (mennyezet és nem burkolt falak)": "Painting, skimming (ceiling and untiled walls)",
+        "Elektromos padlófűtés (fűtőszőnyeg + termosztát)": "Electric underfloor heating (heating mat + thermostat)",
+        "Bontás, előkészítés, takarítás": "Demolition, preparation, cleaning",
+        "Burkolás / új padló (anyag + munka)": "Tiling / new floor (material + labour)",
+        "Festés, glettelés": "Painting, skimming",
+        "Villany frissítés (lámpák, kapcsolók, dugaljak)": "Electrical refresh (lights, switches, sockets)",
+        "Részleges bontás, törmelékelszállítás": "Partial demolition, debris removal",
+        "Falazás, vakolás, gipszkarton, glettelés": "Masonry, plastering, drywall, skimming",
+        "Faljavítás, glettelés, gipszkarton": "Wall repair, skimming, drywall",
+        "Aljzatkiegyenlítés és vízszigetelés": "Floor levelling and waterproofing",
+        "Gépészet (víz, csatorna) és villanyszerelés": "Plumbing (water, drainage) and electrical work",
+        "Gépészet és villany (részleges)": "Plumbing and electrics (partial)",
+        "Burkolás és padló (anyag + munka)": "Tiling and flooring (material + labour)",
+        "Falátalakítás és vizes pont áthelyezés": "Wall alterations and relocating wet points",
+        "Konyhabútor és munkalap (vízkiállás-igazítással)": "Kitchen units and worktop (with plumbing adjustment)",
+        "Vizes padlófűtés (rendszer + szerelés)": "Water underfloor heating (system + installation)",
+        "Hőszivattyús fűtési rendszer (komplett)": "Heat pump heating system (complete)",
+        "Klíma (beltéri egység, szereléssel)": "Air conditioning (indoor unit, with installation)",
+        "Bontás, burkolás, gépészet- és villanykiállás, padló, festés": "Demolition, tiling, plumbing and electrical rough-in, floor, painting",
+        "Beépített gépek (sütő, főzőlap, páraelszívó stb.)": "Built-in appliances (oven, hob, extractor, etc.)",
+        "Víz/gáz/villany pontok áthelyezése (vízkiállás)": "Relocating water/gas/electrical points",
+        "Előkészítés, takarítás": "Preparation, cleaning",
+        "Új padló (anyag + munka)": "New floor (material + labour)",
+        "Apró javítások": "Minor repairs",
+    },
+    de: {
+        "Bontás, törmelékelszállítás, konténer": "Abbruch, Schuttentsorgung, Container",
+        "Aljzatkiegyenlítés és kétrétegű vízszigetelés": "Bodenausgleich und zweilagige Abdichtung",
+        "Burkolás munkadíja (fal + padló)": "Verlegearbeit (Wand + Boden)",
+        "Csempe és járólap (anyag)": "Wand- und Bodenfliesen (Material)",
+        "Gépészet (víz- és lefolyóvezeték, bekötések)": "Sanitärinstallation (Wasser- und Abflussleitungen, Anschlüsse)",
+        "Villanyszerelés (világítás, csatlakozók, szellőztetés)": "Elektroinstallation (Beleuchtung, Steckdosen, Lüftung)",
+        "Szaniterek és csaptelepek (anyag + beépítés)": "Sanitärobjekte und Armaturen (Material + Einbau)",
+        "Festés, glettelés (mennyezet és nem burkolt falak)": "Malern, Spachteln (Decke und nicht geflieste Wände)",
+        "Elektromos padlófűtés (fűtőszőnyeg + termosztát)": "Elektrische Fußbodenheizung (Heizmatte + Thermostat)",
+        "Bontás, előkészítés, takarítás": "Abbruch, Vorbereitung, Reinigung",
+        "Burkolás / új padló (anyag + munka)": "Belag / neuer Boden (Material + Arbeit)",
+        "Festés, glettelés": "Malern, Spachteln",
+        "Villany frissítés (lámpák, kapcsolók, dugaljak)": "Elektro-Auffrischung (Lampen, Schalter, Steckdosen)",
+        "Részleges bontás, törmelékelszállítás": "Teilabbruch, Schuttentsorgung",
+        "Falazás, vakolás, gipszkarton, glettelés": "Mauerwerk, Verputz, Trockenbau, Spachteln",
+        "Faljavítás, glettelés, gipszkarton": "Wandreparatur, Spachteln, Trockenbau",
+        "Aljzatkiegyenlítés és vízszigetelés": "Bodenausgleich und Abdichtung",
+        "Gépészet (víz, csatorna) és villanyszerelés": "Sanitär (Wasser, Abwasser) und Elektroinstallation",
+        "Gépészet és villany (részleges)": "Sanitär und Elektrik (teilweise)",
+        "Burkolás és padló (anyag + munka)": "Belag und Boden (Material + Arbeit)",
+        "Falátalakítás és vizes pont áthelyezés": "Wandumbau und Verlegung der Nassanschlüsse",
+        "Konyhabútor és munkalap (vízkiállás-igazítással)": "Küchenmöbel und Arbeitsplatte (mit Anschlussanpassung)",
+        "Vizes padlófűtés (rendszer + szerelés)": "Warmwasser-Fußbodenheizung (System + Montage)",
+        "Hőszivattyús fűtési rendszer (komplett)": "Wärmepumpen-Heizsystem (komplett)",
+        "Klíma (beltéri egység, szereléssel)": "Klimaanlage (Innengerät, mit Montage)",
+        "Bontás, burkolás, gépészet- és villanykiállás, padló, festés": "Abbruch, Belag, Sanitär- und Elektro-Rohinstallation, Boden, Malern",
+        "Beépített gépek (sütő, főzőlap, páraelszívó stb.)": "Einbaugeräte (Backofen, Kochfeld, Dunstabzug usw.)",
+        "Víz/gáz/villany pontok áthelyezése (vízkiállás)": "Verlegung der Wasser-/Gas-/Stromanschlüsse",
+        "Előkészítés, takarítás": "Vorbereitung, Reinigung",
+        "Új padló (anyag + munka)": "Neuer Boden (Material + Arbeit)",
+        "Apró javítások": "Kleinere Reparaturen",
+    },
+};
+function translateItemLabel(huLabel, lang) {
+    const L = normLang(lang);
+    if (L === "hu") return huLabel;
+    const dict = ITEM_LABELS_I18N[L];
+    // Dynamic-count / length labels first.
+    let m;
+    if ((m = huLabel.match(/^Beltéri ajtók? \((\d+) db\)$/))) {
+        const n = m[1];
+        return L === "de" ? `Innentüren (${n} Stk.)` : `Interior doors (${n} ${n === "1" ? "pc" : "pcs"})`;
+    }
+    if ((m = huLabel.match(/^Fürdőszoba\/WC szaniter és vízszigetelés \((\d+) db\)$/))) {
+        return L === "de" ? `Bad/WC Sanitär und Abdichtung (${m[1]} Stk.)` : `Bathroom/WC sanitaryware and waterproofing (${m[1]} pcs)`;
+    }
+    if ((m = huLabel.match(/^Nyílászárócsere - ablakok \((\d+) db\)$/))) {
+        return L === "de" ? `Fenstertausch (${m[1]} Stk.)` : `Window replacement (${m[1]} pcs)`;
+    }
+    if ((m = huLabel.match(/^Fűtéskorszerűsítés - radiátorcsere \((\d+) db\)$/))) {
+        return L === "de" ? `Heizungsmodernisierung - Heizkörpertausch (${m[1]} Stk.)` : `Heating upgrade - radiator replacement (${m[1]} pcs)`;
+    }
+    if ((m = huLabel.match(/^Konyhabútor és munkalap \(([\d,]+) fm\)$/))) {
+        return L === "de" ? `Küchenmöbel und Arbeitsplatte (${m[1]} lfm)` : `Kitchen units and worktop (${m[1]} rm)`;
+    }
+    return (dict && dict[huLabel]) || huLabel; // fall back to Hungarian if unmapped
 }
 
 // Choice fields with fixed tokens, validated against their allowed set below.
@@ -1020,33 +1318,41 @@ function sanitizeChoices(s) {
 
 // Project summary as [label, value] pairs, tailored to the project type. Reused
 // by the chat recap and both e-mails so they never drift apart.
-function summaryPairs(sel) {
+// Recap-row key labels, per language.
+const RECAP_KEYS = {
+    hu: { type: "Típus", size: "Méret", finish: "Kivitelezési szint", shower: "Zuhany / kád", layout: "Elrendezés", heat: "Padlófűtés", scope: "Munka jellege", baths: "Fürdőszobák", kitchen: "Konyha", condition: "Jelenlegi állapot", walls: "Falmozgatás", floor: "Padló jellege", windows: "Ablakcsere", heatsys: "Fűtés", klima: "Klíma", newkitchen: "Új konyhabútor", units: "Bútor hossza", appliances: "Beépített gépek", showerNA: "Nem lehetséges (épített zuhanyzó)" },
+    en: { type: "Type", size: "Size", finish: "Finish level", shower: "Shower / bath", layout: "Layout", heat: "Underfloor heating", scope: "Type of work", baths: "Bathrooms", kitchen: "Kitchen", condition: "Current condition", walls: "Wall changes", floor: "Floor type", windows: "Window replacement", heatsys: "Heating", klima: "Air conditioning", newkitchen: "New kitchen units", units: "Units length", appliances: "Built-in appliances", showerNA: "Not possible (walk-in shower)" },
+    de: { type: "Typ", size: "Größe", finish: "Ausstattungsniveau", shower: "Dusche / Wanne", layout: "Anordnung", heat: "Fußbodenheizung", scope: "Art der Arbeiten", baths: "Bäder", kitchen: "Küche", condition: "Aktueller Zustand", walls: "Wandänderungen", floor: "Bodenart", windows: "Fenstertausch", heatsys: "Heizung", klima: "Klimaanlage", newkitchen: "Neue Küchenmöbel", units: "Möbellänge", appliances: "Einbaugeräte", showerNA: "Nicht möglich (gemauerte Dusche)" },
+};
+function summaryPairs(sel, lang = "hu") {
+    const L = normLang(lang);
+    const K = RECAP_KEYS[L] || RECAP_KEYS.hu;
     const pt = sel.projectType || "furdo";
-    const p = [["Típus", lbl("projectType", pt)], ["Méret", sizeLabel(sel.size, pt)], ["Kivitelezési szint", lbl("tier", sel.tier)]];
+    const p = [[K.type, lbl("projectType", pt, L)], [K.size, sizeLabel(sel.size, pt, L)], [K.finish, lbl("tier", sel.tier, L)]];
     if (pt === "furdo") {
-        p.push(["Zuhany / kád", lbl("washing", sel.washing)]);
-        p.push(["Elrendezés", lbl("layout", sel.layout)]);
+        p.push([K.shower, lbl("washing", sel.washing, L)]);
+        p.push([K.layout, lbl("layout", sel.layout, L)]);
         // Épített zuhanyzó alá nem kerül padlófűtés - ilyenkor ezt jelezzük, nem "-".
-        p.push(["Padlófűtés", sel.washing === "zuhany" ? "Nem lehetséges (épített zuhanyzó)" : lbl("heating", sel.heating)]);
+        p.push([K.heat, sel.washing === "zuhany" ? K.showerNA : lbl("heating", sel.heating, L)]);
     } else if (pt === "lakas" || pt === "haz") {
         const has = (k) => sel[k] != null && String(sel[k]).trim() !== "";
-        p.push(["Munka jellege", lbl("scope", sel.scope)]);
-        p.push(["Fürdőszobák", lbl("bathrooms", sel.bathrooms)]);
-        p.push(["Konyha", lbl("kitchen", sel.kitchen)]);
+        p.push([K.scope, lbl("scope", sel.scope, L)]);
+        p.push([K.baths, lbl("bathrooms", sel.bathrooms, L)]);
+        p.push([K.kitchen, lbl("kitchen", sel.kitchen, L)]);
         // Refine answers - only shown if the customer actually gave them.
-        if (has("condition")) p.push(["Jelenlegi állapot", lbl("condition", sel.condition)]);
-        if (has("walls")) p.push(["Falmozgatás", lbl("walls", sel.walls)]);
-        if (has("floortile")) p.push(["Padló jellege", lbl("floortile", sel.floortile)]);
-        if (has("windows")) p.push(["Ablakcsere", lbl("windows", sel.windows)]);
-        if (has("heatingsys")) p.push(["Fűtés", lbl("heatingsys", sel.heatingsys)]);
-        if (has("klima")) p.push(["Klíma", lbl("klima", sel.klima)]);
+        if (has("condition")) p.push([K.condition, lbl("condition", sel.condition, L)]);
+        if (has("walls")) p.push([K.walls, lbl("walls", sel.walls, L)]);
+        if (has("floortile")) p.push([K.floor, lbl("floortile", sel.floortile, L)]);
+        if (has("windows")) p.push([K.windows, lbl("windows", sel.windows, L)]);
+        if (has("heatingsys")) p.push([K.heatsys, lbl("heatingsys", sel.heatingsys, L)]);
+        if (has("klima")) p.push([K.klima, lbl("klima", sel.klima, L)]);
     } else if (pt === "konyha") {
-        p.push(["Új konyhabútor", lbl("furniture", sel.furniture)]);
-        if (sel.furniture === "igen" && sel.kitchen_fm) p.push(["Bútor hossza", lbl("kitchen_fm", sel.kitchen_fm)]);
-        p.push(["Beépített gépek", lbl("appliances", sel.appliances)]);
-        p.push(["Elrendezés", lbl("layout", sel.layout)]);
+        p.push([K.newkitchen, lbl("furniture", sel.furniture, L)]);
+        if (sel.furniture === "igen" && sel.kitchen_fm) p.push([K.units, lbl("kitchen_fm", sel.kitchen_fm, L)]);
+        p.push([K.appliances, lbl("appliances", sel.appliances, L)]);
+        p.push([K.layout, lbl("layout", sel.layout, L)]);
     } else if (pt === "szoba") {
-        p.push(["Munka jellege", lbl("roomscope", sel.roomscope)]);
+        p.push([K.scope, lbl("roomscope", sel.roomscope, L)]);
     }
     return p;
 }
@@ -1072,50 +1378,91 @@ function runningEstimate(sel) {
 
 // Customer-facing estimate. Returns sections split by [[SPLIT]] so the widget
 // renders them as separate chat bubbles. Numbers come from buildQuote.
-function renderCustomerQuote(quote, sel) {
+// Customer-facing quote prose, per language. Each returns the three bubbles as
+// an array. Numbers/labels are passed in already formatted/translated.
+const QUOTE_STR = {
+    hu: {
+        approx: "kb.",
+        price: (name, size, tierLower, what, items, low, high) => [
+            `Köszönöm, ${name}! Íme az **előzetes árajánlata** egy **${size}**, **${tierLower}** ${what}ra.`,
+            ``, `**Tételek (tájékoztató, kb. sávval):**`, items, ``,
+            `**Becsült végösszeg: kb. ${low} – ${high}**`, `(nettó árak, **kulcsrakész**)`,
+        ].join("\n"),
+        inclFurdo: "bontás, gépészet, villany, vízszigetelés, burkolás, festés, valamint a szaniterek és csaptelepek anyaga és beépítése",
+        inclOther: "a fenti tételek - anyaggal és munkadíjjal, kulcsrakész kivitelben",
+        next: (incl) => [
+            `Ez egy **tájékoztató becslés** - a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott anyagok és a pontos műszaki tartalom függvényében.`,
+            ``, `**Mit tartalmaz?** Kulcsrakész ár: ${incl}.`, ``, `**Mi a következő lépés?**`,
+            `• Kollégánk **hamarosan keresi** a megadott telefonszámon.`,
+            `• Egyeztetünk egy időpontot az **ingyenes felmérésre**.`,
+            `• Utána megkapja a **végleges, tételes ajánlatot**.`,
+        ].join("\n"),
+        recapTitle: "**Az Ön igénye röviden:**",
+        urgent: (phone) => `Sürgős esetben hívjon: ${phone}`,
+        emailQ: "Szeretné, hogy e-mailben is elküldjük az ajánlatot?",
+    },
+    en: {
+        approx: "approx.",
+        price: (name, size, tierLower, what, items, low, high) => [
+            `Thank you, ${name}! Here is your **preliminary quote** - **${what}**, **${tierLower}** finish, **${size}**.`,
+            ``, `**Line items (indicative, with an approx. range):**`, items, ``,
+            `**Estimated total: approx. ${low} – ${high}**`, `(net prices, **turnkey**)`,
+        ].join("\n"),
+        inclFurdo: "demolition, plumbing, electrics, waterproofing, tiling, painting, plus the material and installation of the sanitaryware and taps",
+        inclOther: "the items above - with materials and labour, in turnkey form",
+        next: (incl) => [
+            `This is an **indicative estimate** - the final price is set after the **free on-site survey**, depending on the chosen materials and the exact technical scope.`,
+            ``, `**What's included?** Turnkey price: ${incl}.`, ``, `**What happens next?**`,
+            `• Our colleague will **contact you shortly** on the number you gave.`,
+            `• We'll arrange a time for the **free survey**.`,
+            `• Then you'll receive the **final, itemised offer**.`,
+        ].join("\n"),
+        recapTitle: "**Your request in brief:**",
+        urgent: (phone) => `In urgent cases, call us: ${phone}`,
+        emailQ: "Would you like us to e-mail you the offer as well?",
+    },
+    de: {
+        approx: "ca.",
+        price: (name, size, tierLower, what, items, low, high) => [
+            `Vielen Dank, ${name}! Hier ist Ihr **vorläufiges Angebot** - **${what}**, Ausstattung **${tierLower}**, **${size}**.`,
+            ``, `**Positionen (Richtwerte, mit ca.-Spanne):**`, items, ``,
+            `**Geschätzte Gesamtsumme: ca. ${low} – ${high}**`, `(Nettopreise, **schlüsselfertig**)`,
+        ].join("\n"),
+        inclFurdo: "Abbruch, Sanitär, Elektrik, Abdichtung, Belag, Malern sowie Material und Einbau der Sanitärobjekte und Armaturen",
+        inclOther: "die obigen Positionen - mit Material und Arbeit, schlüsselfertig",
+        next: (incl) => [
+            `Dies ist eine **Richtschätzung** - der endgültige Preis wird nach der **kostenlosen Vor-Ort-Besichtigung** festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.`,
+            ``, `**Was ist enthalten?** Schlüsselfertiger Preis: ${incl}.`, ``, `**Wie geht es weiter?**`,
+            `• Unser Kollege **meldet sich in Kürze** unter der angegebenen Nummer.`,
+            `• Wir vereinbaren einen Termin für die **kostenlose Besichtigung**.`,
+            `• Anschließend erhalten Sie das **endgültige, detaillierte Angebot**.`,
+        ].join("\n"),
+        recapTitle: "**Ihre Anfrage in Kürze:**",
+        urgent: (phone) => `In dringenden Fällen rufen Sie uns an: ${phone}`,
+        emailQ: "Möchten Sie das Angebot auch per E-Mail erhalten?",
+    },
+};
+function renderCustomerQuote(quote, sel, lang = "hu") {
+    const L = normLang(lang);
+    const S = QUOTE_STR[L] || QUOTE_STR.hu;
     const pt = sel.projectType || "furdo";
-    const what = lbl("projectType", pt).toLowerCase();
-    const items = quote.items.map(i => `• ${i.label} - **kb. ${formatHuf(i.low)} – ${formatHuf(i.high)}**`).join("\n");
+    const what = lbl("projectType", pt, L); // already a noun label in the right language
+    const items = quote.items
+        .map(i => `• ${translateItemLabel(i.label, L)} - **${S.approx} ${formatHuf(i.low)} – ${formatHuf(i.high)}**`)
+        .join("\n");
 
-    // Bubble 1 - the price (every line + the total shown as a "kb." range), with a
-    // one-line context. All amounts are NET (nettó) - no gross / VAT figure shown.
-    const priceBubble = [
-        `Köszönöm, ${sel.name || ""}! Íme az **előzetes árajánlata** egy **${sizeLabel(sel.size, pt)}**, **${lbl("tier", sel.tier).toLowerCase()}** ${what}ra.`,
-        ``,
-        `**Tételek (tájékoztató, kb. sávval):**`,
-        items,
-        ``,
-        `**Becsült végösszeg: kb. ${formatHuf(quote.low)} – ${formatHuf(quote.high)}**`,
-        `(nettó árak, **kulcsrakész**)`,
-    ].join("\n");
+    const priceBubble = S.price(
+        sel.name || "", sizeLabel(sel.size, pt, L), lbl("tier", sel.tier, L).toLowerCase(),
+        L === "hu" ? what.toLowerCase() : what, items, formatHuf(quote.low), formatHuf(quote.high),
+    );
+    const incl = pt === "furdo" ? S.inclFurdo : S.inclOther;
+    const nextBubble = S.next(incl);
 
-    // Bubble 2 - what's included + the estimate caveat + the next steps. This is
-    // the part that "makes everything make sense": it frames the number, says
-    // what it covers, and tells the customer exactly what happens next.
-    const incl = pt === "furdo"
-        ? "bontás, gépészet, villany, vízszigetelés, burkolás, festés, valamint a szaniterek és csaptelepek anyaga és beépítése"
-        : "a fenti tételek - anyaggal és munkadíjjal, kulcsrakész kivitelben";
-    const nextBubble = [
-        `Ez egy **tájékoztató becslés** - a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott anyagok és a pontos műszaki tartalom függvényében.`,
-        ``,
-        `**Mit tartalmaz?** Kulcsrakész ár: ${incl}.`,
-        ``,
-        `**Mi a következő lépés?**`,
-        `• Kollégánk **hamarosan keresi** a megadott telefonszámon.`,
-        `• Egyeztetünk egy időpontot az **ingyenes felmérésre**.`,
-        `• Utána megkapja a **végleges, tételes ajánlatot**.`,
-    ].join("\n");
-
-    // Bubble 3 - compact recap of the PROJECT only (no echo of the contact data
-    // they just typed; the owner gets all of that by e-mail).
-    const recap = [`**Az Ön igénye röviden:**`];
-    for (const [k, v] of summaryPairs(sel)) recap.push(`• ${k}: **${v}**`);
+    const recap = [S.recapTitle];
+    for (const [k, v] of summaryPairs(sel, L)) recap.push(`• ${k}: **${v}**`);
     recap.push(``);
-    recap.push(`Sürgős esetben hívjon: ${PHONE}`);
-    if (EMAIL_OFFER_ENABLED) {
-        recap.push(``);
-        recap.push(`Szeretné, hogy e-mailben is elküldjük az ajánlatot?`);
-    }
+    recap.push(S.urgent(PHONE));
+    if (EMAIL_OFFER_ENABLED) { recap.push(``); recap.push(S.emailQ); }
 
     return [priceBubble, nextBubble, recap.join("\n")].join("\n[[SPLIT]]\n");
 }
@@ -1235,6 +1582,70 @@ A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectTyp
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") - és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 A választógombokat a rendszer automatikusan megjeleníti - neked nem kell gombokat kiírnod.`;
 
+// The flow/contract above is defined in Hungarian. For EN/DE we keep the same
+// flow but add a high-priority directive telling the model which language to
+// SPEAK in - while keeping the hidden DATA block's canonical tokens unchanged.
+function systemPromptFor(lang) {
+    const L = normLang(lang);
+    if (L === "hu") return SYSTEM_PROMPT;
+    const lname = L === "de" ? "GERMAN (Deutsch)" : "ENGLISH";
+    return SYSTEM_PROMPT + `
+
+=== LANGUAGE OVERRIDE (HIGHEST PRIORITY - OVERRIDES ALL EARLIER LANGUAGE RULES) ===
+Ignore the earlier instruction "Kizárólag MAGYARUL válaszolj". You MUST write EVERY user-visible message ONLY in ${lname}. Translate all questions, option lists, explanations and confirmations naturally and fluently into ${lname}; use correct construction terminology.
+The instructions above contain example sentences in Hungarian (e.g. "Közben bármit kérdezhet is.", "Köszönöm, összeállítom az árajánlatot!"). These are TEMPLATES, not text to copy - render their meaning in ${lname}. NEVER output any Hungarian words in a user-visible message; if you notice Hungarian slipping in, rewrite it in ${lname}.
+DO NOT translate or alter the hidden <!--DATA:...--> block: its keys AND its token values (e.g. furdo, konyha, lakas, haz, szoba, basic, mid, premium, zuhany, zuhanykabin, kad, mindketto, marad, athelyez, igen, nem, nem_tudom, teljes, reszleges, kozmetikai, festes, festes_padlo, csere, radiator, padlofutes, hoszivattyu, yes, no, t_asap, t_month, t_halfyear, t_thisyear, t_unsure) stay EXACTLY as defined.
+All money stays in Hungarian Forint (Ft). Never use emojis or em dashes; use a plain hyphen "-".`;
+}
+
+// Short customer-facing system messages (validation re-asks, rate-limit, errors),
+// per language. The owner-facing logs/e-mail stay Hungarian regardless.
+const MSG = {
+    hu: {
+        reaskEmailTypo: "Hoppá, úgy tűnik **elírás** csúszott a címbe - a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét.",
+        reaskEmail: "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).",
+        reaskPhone: "Ezt a **telefonszámot** nem sikerült értelmezni. Kérem, adja meg a teljes számát (pl. **+36 20 123 4567** vagy **06 30 123 4567**).",
+        reaskPostal: "Az **irányítószám** 4 számjegyű (pl. **3525**). Kérem, így adja meg.",
+        rateChat: "Túl sok üzenet rövid idő alatt. Kérjük, várjon egy kicsit, és próbálja újra.",
+        rateEmail: "Túl sok kérés. Kérjük, próbálja meg kicsit később.",
+        aiDown: "Elnézést, most nem érem el az asszisztenst. Kérlek próbáld újra.",
+        noParse: "Értem, de ezt nem sikerült feldolgoznom. Megfogalmaznád másképp?",
+        serverErr: "Elnézést, a szerver épp akadozik. Kérlek próbáld újra kicsit később.",
+        emailSentOk: (email) => `Elküldtük az árajánlatot a megadott e-mail címre (${email}). Ha nem találja, nézze meg a Spam mappát is.`,
+        emailSentFail: (phone) => `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. ${phone}`,
+        emailOffOk: (phone) => `Köszönjük! Kollégánk hamarosan keresi Önt a részletekkel. ${phone}`,
+    },
+    en: {
+        reaskEmailTypo: "Oops, looks like a **typo** slipped into the address - the correct Gmail ending is **gmail.com**. Please type your full e-mail address again.",
+        reaskEmail: "I couldn't read that **e-mail address**. Please type the full address (e.g. **name@gmail.com**).",
+        reaskPhone: "I couldn't read that **phone number**. Please give the full number (e.g. **+36 20 123 4567**).",
+        reaskPostal: "The **postcode** is 4 digits (e.g. **3525**). Please enter it that way.",
+        rateChat: "Too many messages in a short time. Please wait a moment and try again.",
+        rateEmail: "Too many requests. Please try again a little later.",
+        aiDown: "Sorry, I can't reach the assistant right now. Please try again.",
+        noParse: "I understand, but I couldn't process that. Could you rephrase it?",
+        serverErr: "Sorry, the server is having a hiccup. Please try again a little later.",
+        emailSentOk: (email) => `We've sent the quote to the e-mail address you gave (${email}). If you can't find it, please check your Spam folder.`,
+        emailSentFail: (phone) => `Sorry, we couldn't send the e-mail right now, but our colleague will contact you shortly. ${phone}`,
+        emailOffOk: (phone) => `Thank you! Our colleague will contact you shortly with the details. ${phone}`,
+    },
+    de: {
+        reaskEmailTypo: "Hoppla, da hat sich wohl ein **Tippfehler** in die Adresse geschlichen - die richtige Gmail-Endung ist **gmail.com**. Bitte geben Sie Ihre vollständige E-Mail-Adresse erneut ein.",
+        reaskEmail: "Diese **E-Mail-Adresse** konnte ich nicht lesen. Bitte geben Sie die vollständige Adresse ein (z. B. **name@gmail.com**).",
+        reaskPhone: "Diese **Telefonnummer** konnte ich nicht lesen. Bitte geben Sie die vollständige Nummer an (z. B. **+36 20 123 4567**).",
+        reaskPostal: "Die **Postleitzahl** hat 4 Ziffern (z. B. **3525**). Bitte so eingeben.",
+        rateChat: "Zu viele Nachrichten in kurzer Zeit. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
+        rateEmail: "Zu viele Anfragen. Bitte versuchen Sie es etwas später erneut.",
+        aiDown: "Entschuldigung, ich erreiche den Assistenten gerade nicht. Bitte versuchen Sie es erneut.",
+        noParse: "Verstanden, aber das konnte ich nicht verarbeiten. Können Sie es anders formulieren?",
+        serverErr: "Entschuldigung, der Server stockt gerade. Bitte versuchen Sie es etwas später erneut.",
+        emailSentOk: (email) => `Wir haben das Angebot an die angegebene E-Mail-Adresse gesendet (${email}). Falls Sie es nicht finden, prüfen Sie bitte auch den Spam-Ordner.`,
+        emailSentFail: (phone) => `Leider konnten wir die E-Mail gerade nicht senden, aber unser Kollege meldet sich in Kürze bei Ihnen. ${phone}`,
+        emailOffOk: (phone) => `Vielen Dank! Unser Kollege meldet sich in Kürze mit den Details bei Ihnen. ${phone}`,
+    },
+};
+const msg = (lang) => MSG[normLang(lang)] || MSG.hu;
+
 // ---------------------------------------------------------------------------
 //  AI providers - each takes normalized messages and returns { ok, text, error }
 // ---------------------------------------------------------------------------
@@ -1310,6 +1721,10 @@ export default async function handler(request, response) {
     if (request.method !== "POST") return response.status(405).json({ answer: "Method Not Allowed" });
 
     const ip = clientIp(request);
+    // Customer's UI language (synced from the host site: hu | en | de). Drives
+    // chips, recap, quote prose and the AI's reply language. Owner e-mail/logs
+    // stay Hungarian.
+    const lang = normLang((request.body || {}).lang);
 
     try {
         const { question, history, action, lead } = request.body || {};
@@ -1320,25 +1735,24 @@ export default async function handler(request, response) {
         // client-supplied numbers/labels), validate the recipient, gate it behind
         // EMAIL_OFFER, and rate-limit hard - so this can't become a spam relay.
         if (action === "email_customer") {
+            const M = msg(lang);
             if (!EMAIL_OFFER_ENABLED) {
-                return response.status(200).json({ answer: `Köszönjük! Kollégánk hamarosan keresi Önt a részletekkel. ${PHONE}`, chips: [] });
+                return response.status(200).json({ answer: M.emailOffOk(PHONE), chips: [] });
             }
             const rl = rateLimit(`email:${ip}`, RL_EMAIL.limit, RL_EMAIL.windowMs);
             if (!rl.ok) {
                 response.setHeader("Retry-After", String(rl.retryAfter));
-                return response.status(429).json({ answer: "Túl sok kérés. Kérjük, próbálja meg kicsit később.", chips: [] });
+                return response.status(429).json({ answer: M.rateEmail, chips: [] });
             }
             const sel = sanitizeChoices(stripManaged({ ...(lead && lead.sel) }));
             // Only a complete, valid quote with a deliverable e-mail may be sent.
             if (!isQuoteReady(sel) || emailIssue(sel.email)) {
-                return response.status(200).json({ answer: `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. ${PHONE}`, chips: [] });
+                return response.status(200).json({ answer: M.emailSentFail(PHONE), chips: [] });
             }
             const quote = buildQuote(sel); // recomputed, authoritative
-            const ok = await sendQuoteEmail(sel, quote, { to: sel.email, toCustomer: true });
+            const ok = await sendQuoteEmail(sel, quote, { to: sel.email, toCustomer: true, lang });
             return response.status(200).json({
-                answer: ok
-                    ? `Elküldtük az árajánlatot a megadott e-mail címre (${esc(sel.email)}). Ha nem találja, nézze meg a Spam mappát is.`
-                    : `Sajnos most nem sikerült e-mailt küldeni, de kollégánk hamarosan keresi Önt. ${PHONE}`,
+                answer: ok ? M.emailSentOk(esc(sel.email)) : M.emailSentFail(PHONE),
                 chips: [],
             });
         }
@@ -1348,7 +1762,7 @@ export default async function handler(request, response) {
         const rlChat = rateLimit(`chat:${ip}`, RL_CHAT.limit, RL_CHAT.windowMs);
         if (!rlChat.ok) {
             response.setHeader("Retry-After", String(rlChat.retryAfter));
-            return response.status(429).json({ answer: "Túl sok üzenet rövid idő alatt. Kérjük, várjon egy kicsit, és próbálja újra." });
+            return response.status(429).json({ answer: msg(lang).rateChat });
         }
         const badInput = validateChatInput(question, history);
         if (badInput) return response.status(400).json({ answer: badInput });
@@ -1367,14 +1781,15 @@ export default async function handler(request, response) {
             const pend = pendingField(baseSel);
             let reask = null;
             if (typeof question === "string" && question.trim()) {
+                const M = msg(lang);
                 if (pend === "email") {
                     const i = emailIssue(question);
-                    if (i === "gmail") reask = "Hoppá, úgy tűnik **elírás** csúszott a címbe - a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét.";
-                    else if (i) reask = "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).";
+                    if (i === "gmail") reask = M.reaskEmailTypo;
+                    else if (i) reask = M.reaskEmail;
                 } else if (pend === "phone") {
-                    if (phoneIssue(question)) reask = "Ezt a **telefonszámot** nem sikerült értelmezni. Kérem, adja meg a teljes számát (pl. **+36 20 123 4567** vagy **06 30 123 4567**).";
+                    if (phoneIssue(question)) reask = M.reaskPhone;
                 } else if (pend === "postal_code") {
-                    if (postalIssue(question)) reask = "Az **irányítószám** 4 számjegyű (pl. **3525**). Kérem, így adja meg.";
+                    if (postalIssue(question)) reask = M.reaskPostal;
                 }
             }
             if (reask) {
@@ -1389,8 +1804,8 @@ export default async function handler(request, response) {
             }
         }
 
-        // Normalized message list for the model.
-        const messages = [{ role: "system", content: SYSTEM_PROMPT }];
+        // Normalized message list for the model (system prompt in the customer's language).
+        const messages = [{ role: "system", content: systemPromptFor(lang) }];
         if (Array.isArray(history) && history.length > 0) {
             for (const m of history) {
                 if (m && m.role && typeof m.content === "string") {
@@ -1406,12 +1821,12 @@ export default async function handler(request, response) {
 
         if (!result.ok) {
             console.error(`[${provider}] API Error:`, result.error);
-            return response.status(200).json({ answer: "Elnézést, most nem érem el az asszisztenst. Kérlek próbáld újra." });
+            return response.status(200).json({ answer: msg(lang).aiDown });
         }
 
         let aiAnswer = result.text;
         if (!aiAnswer) {
-            return response.status(200).json({ answer: "Értem, de ezt nem sikerült feldolgoznom. Megfogalmaznád másképp?" });
+            return response.status(200).json({ answer: msg(lang).noParse });
         }
 
         // --- STATE: extract the running DATA block from THIS message ... ---
@@ -1462,7 +1877,7 @@ export default async function handler(request, response) {
             await sendQuoteEmail(sel, quote, { to: process.env.LEAD_EMAIL_TO || "pirint.milan@gmail.com", toCustomer: false });
 
             return response.status(200).json({
-                answer: renderCustomerQuote(quote, sel),
+                answer: renderCustomerQuote(quote, sel, lang),
                 chips: [],
                 emailOffer: EMAIL_OFFER_ENABLED,
                 lead: { sel, quote },
@@ -1474,23 +1889,32 @@ export default async function handler(request, response) {
         }
 
         aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
-        const chips = nextChips(sel);
+        const chips = nextChips(sel, lang);
         return response.status(200).json({ answer: aiAnswer, chips, state: sel, estimate: runningEstimate(sel), progress, progressTotal });
 
     } catch (error) {
         console.error("Function Crash:", error.message);
-        return response.status(500).json({ answer: "Elnézést, a szerver épp akadozik. Kérlek próbáld újra kicsit később." });
+        return response.status(500).json({ answer: msg(lang).serverErr });
     }
 }
 
 // ---------------------------------------------------------------------------
 //  E-mail (Resend). opts = { to, toCustomer }. Returns true on success.
 // ---------------------------------------------------------------------------
+// Customer-email headings/words, per language. The owner copy is always Hungarian.
+const EMAIL_STR = {
+    hu: { approx: "kb.", yourQuote: (flow) => `Az Ön árajánlata - NM Bau ${flow}`, intro: (name) => `Kedves ${name || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:`, summaryH: "A felújítás összefoglalása", quoteH: "Kalkulált árajánlat (kulcsrakész, nettó)", totalRow: "Becsült végösszeg (kb. sáv)", footnote: "Előzetes, tájékoztató jellegű kalkuláció, nettó árakkal, kulcsrakész. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.", subject: (low, high) => `Az Ön árajánlata - NM Bau - ${low} – ${high}` },
+    en: { approx: "approx.", yourQuote: (flow) => `Your quote - NM Bau ${flow}`, intro: (name) => `Dear ${name || "Customer"}, thank you for your enquiry. Here is your preliminary quote:`, summaryH: "Renovation summary", quoteH: "Calculated quote (turnkey, net)", totalRow: "Estimated total (approx. range)", footnote: "Preliminary, indicative calculation with net prices, turnkey. The exact price is finalised after the on-site survey, depending on the chosen materials and the precise technical scope.", subject: (low, high) => `Your quote - NM Bau - ${low} – ${high}` },
+    de: { approx: "ca.", yourQuote: (flow) => `Ihr Angebot - NM Bau ${flow}`, intro: (name) => `Sehr geehrte/r ${name || "Kunde/Kundin"}, vielen Dank für Ihre Anfrage. Hier ist Ihr vorläufiges Angebot:`, summaryH: "Zusammenfassung der Renovierung", quoteH: "Berechnetes Angebot (schlüsselfertig, netto)", totalRow: "Geschätzte Gesamtsumme (ca.-Spanne)", footnote: "Vorläufige, unverbindliche Kalkulation mit Nettopreisen, schlüsselfertig. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.", subject: (low, high) => `Ihr Angebot - NM Bau - ${low} – ${high}` },
+};
 async function sendQuoteEmail(sel, quote, opts = {}) {
     const resendKey = process.env.RESEND_API_KEY;
     const toEmail = opts.to || process.env.LEAD_EMAIL_TO || "pirint.milan@gmail.com";
     const fromEmail = process.env.LEAD_EMAIL_FROM || "NM Bau <onboarding@resend.dev>";
     const toCustomer = !!opts.toCustomer;
+    // Customer copy follows the customer's language; the owner copy stays Hungarian.
+    const elang = toCustomer ? normLang(opts.lang) : "hu";
+    const E = EMAIL_STR[elang] || EMAIL_STR.hu;
 
     if (!resendKey) {
         console.log("⚠️  Nincs RESEND_API_KEY - az e-mail kimarad. A lead a fenti logban szerepel.");
@@ -1504,7 +1928,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
     // NB: all customer-supplied text (name/phone/e-mail/postal/budget) is HTML-
     // escaped via esc() so a malicious value can't inject markup into the inbox.
     const itemRows = quote.items
-        .map(i => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${esc(i.label)}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">kb. ${formatHuf(i.low)} – ${formatHuf(i.high)}</td></tr>`)
+        .map(i => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${esc(translateItemLabel(i.label, elang))}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${E.approx} ${formatHuf(i.low)} – ${formatHuf(i.high)}</td></tr>`)
         .join("");
 
     // Client-details block is only included in the owner's copy.
@@ -1518,14 +1942,16 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <p style="margin:4px 0"><b>Tervezett kivitelezés:</b> ${esc(lbl("timeline", sel.timeline))}</p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`;
 
-    const flow = FLOW_LABEL[sel.projectType] || "Felújítás";
-    const heading = toCustomer ? `Az Ön árajánlata - NM Bau ${esc(flow)}` : `Új árajánlat - NM Bau ${esc(flow)}`;
+    const flow = FLOW_LABEL[sel.projectType] || "Felújítás"; // Hungarian, used in owner subject
+    // Customer heading uses the translated project label; owner heading stays HU.
+    const flowDisp = toCustomer ? lbl("projectType", sel.projectType || "furdo", elang) : flow;
+    const heading = toCustomer ? E.yourQuote(esc(flowDisp)) : `Új árajánlat - NM Bau ${esc(flow)}`;
     const intro = toCustomer
-        ? `<p style="margin:0 0 12px">Kedves ${esc(sel.name) || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:</p>`
+        ? `<p style="margin:0 0 12px">${esc(E.intro(sel.name))}</p>`
         : "";
 
     // Project summary rows, tailored to the project type (shared with the chat recap).
-    const summaryRows = summaryPairs(sel)
+    const summaryRows = summaryPairs(sel, elang)
         .map(([k, v]) => `<p style="margin:4px 0"><b>${esc(k)}:</b> ${esc(v)}</p>`)
         .join("");
 
@@ -1536,22 +1962,22 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
       </div>
       <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
         ${intro}${clientBlock}
-        <h3 style="margin:0 0 8px">A felújítás összefoglalása</h3>
+        <h3 style="margin:0 0 8px">${esc(E.summaryH)}</h3>
         ${summaryRows}
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
-        <h3 style="margin:0 0 8px">Kalkulált árajánlat (kulcsrakész, nettó)</h3>
+        <h3 style="margin:0 0 8px">${esc(E.quoteH)}</h3>
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
-          <tr><td style="padding:10px 12px;font-weight:bold">Becsült végösszeg (kb. sáv)</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">kb. ${formatHuf(quote.low)} – ${formatHuf(quote.high)}</td></tr>
+          <tr><td style="padding:10px 12px;font-weight:bold">${esc(E.totalRow)}</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${E.approx} ${formatHuf(quote.low)} – ${formatHuf(quote.high)}</td></tr>
         </table>
         ${toCustomer ? "" : `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af">Fajlagos: ~${formatHuf(quote.perM2)}/m² nettó (kisebb terület esetén magasabb a fix költségek miatt)</p>`}
-        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">Előzetes, tájékoztató jellegű kalkuláció, nettó árakkal, kulcsrakész. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.${toCustomer ? " " + PHONE : ""}</p>
+        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">${esc(E.footnote)}${toCustomer ? " " + PHONE : ""}</p>
       </div>
     </div>`;
 
     // Strip CR/LF from any user value used in the subject (header-injection guard).
     const oneLine = (s) => String(s == null ? "" : s).replace(/[\r\n]+/g, " ").trim();
     const subject = toCustomer
-        ? `Az Ön árajánlata - NM Bau - ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`
+        ? E.subject(formatHuf(quote.low), formatHuf(quote.high))
         : `[ÚJ ÁRAJÁNLAT] ${flow} - ${oneLine(sel.postal_code)} - ${oneLine(sel.name)} - ${formatHuf(quote.low)}–${formatHuf(quote.high)}`;
 
     try {
