@@ -770,24 +770,51 @@
     document.head.appendChild(s);
   }
 
-  // Re-apply the static UI text after a live language switch. Already-rendered
-  // chat bubbles stay as they were; every NEW question/answer arrives in the new
-  // language because sendMessage() sends the current LANG to the backend.
+  // Wipe the running conversation and tear down the chat window so it rebuilds
+  // fresh. Already-rendered bubbles are in the OLD language and can't be
+  // retranslated in place - the only correct fix on a language switch is to
+  // start the conversation over in the new language.
+  function resetConversation() {
+    const wasOpen = chatOpen;
+    conversationHistory = [];
+    convState = {};
+    started = false;
+    lastLead = null;
+    quoteDone = false;
+    lastProgress = 0;
+    lastProgressTotal = 0;
+    lastEstimateText = null;
+    sending = false;
+    thinkingEl = null;
+    if (chatWindow) chatWindow.remove();
+    chatWindow = null;
+    messagesContainer = null;
+    inputElement = null;
+    progressFillEl = null;
+    progressLabelEl = null;
+    progressBarEl = null;
+    estimateBarEl = null;
+    chatOpen = false;
+    const launcher = document.querySelector(".faq-chat-launcher");
+    if (launcher) launcher.classList.remove("active");
+    // If it was open, reopen it now so the user immediately sees the greeting +
+    // first question in the new language. If it was closed, the next open builds
+    // it fresh anyway.
+    if (wasOpen) toggleChat();
+  }
+
+  // Follow a live language switch on the host site. The always-visible launcher
+  // bits are updated in place; the conversation itself is reset (and reopened if
+  // it was open) so it re-renders entirely in the new language.
   function applyLang() {
     const next = detectLang();
     if (next === LANG) return;
     LANG = next;
-    const q = (sel) => document.querySelector(sel);
-    const launcher = q(".faq-chat-launcher");
+    const launcher = document.querySelector(".faq-chat-launcher");
     if (launcher) launcher.setAttribute("aria-label", t().launcherAria);
-    const tipText = q(".faq-chat-tooltip .faq-tooltip-text");
+    const tipText = document.querySelector(".faq-chat-tooltip .faq-tooltip-text");
     if (tipText) tipText.textContent = curTeasers()[teaserIdx % curTeasers().length];
-    const status = q(".faq-header-status");
-    if (status) status.innerHTML = `<span class="faq-status-dot" aria-hidden="true"></span>${t().status}`;
-    if (inputElement) { inputElement.placeholder = t().placeholder; inputElement.setAttribute("aria-label", t().inputAria); }
-    if (chatWindow) chatWindow.setAttribute("aria-label", t().dialogAria);
-    const estLbl = estimateBarEl && estimateBarEl.querySelector("span");
-    if (estLbl) estLbl.textContent = t().estLabel;
+    if (chatWindow) resetConversation();
   }
 
   // Watch the host site's language signal: <html lang> (set by assets/i18n.js on
