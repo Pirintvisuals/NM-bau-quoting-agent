@@ -1874,7 +1874,11 @@ export default async function handler(request, response) {
             console.log(`Becsült sáv: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`);
             console.log("========================================\n");
 
-            await sendQuoteEmail(sel, quote, { to: process.env.LEAD_EMAIL_TO || "pirint.milan@gmail.com", toCustomer: false });
+            await sendQuoteEmail(sel, quote, {
+                to: process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com",
+                toCustomer: false,
+                transcript: Array.isArray(history) ? history : [],
+            });
 
             return response.status(200).json({
                 answer: renderCustomerQuote(quote, sel, lang),
@@ -1909,8 +1913,8 @@ const EMAIL_STR = {
 };
 async function sendQuoteEmail(sel, quote, opts = {}) {
     const resendKey = process.env.RESEND_API_KEY;
-    const toEmail = opts.to || process.env.LEAD_EMAIL_TO || "pirint.milan@gmail.com";
-    const fromEmail = process.env.LEAD_EMAIL_FROM || "NM Bau <onboarding@resend.dev>";
+    const toEmail = opts.to || process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com";
+    const fromEmail = process.env.LEAD_EMAIL_FROM || "NM Bau <ajanlat@send.traumbad.hu>";
     const toCustomer = !!opts.toCustomer;
     // Customer copy follows the customer's language; the owner copy stays Hungarian.
     const elang = toCustomer ? normLang(opts.lang) : "hu";
@@ -1930,6 +1934,25 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
     const itemRows = quote.items
         .map(i => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${esc(translateItemLabel(i.label, elang))}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${E.approx} ${formatHuf(i.low)} – ${formatHuf(i.high)}</td></tr>`)
         .join("");
+
+    // Full chat transcript - owner copy only, so the recipient can see exactly
+    // what the customer said (not just the extracted fields). Plain text is
+    // escaped and newlines preserved; the AI's own <!--DATA:...--> state block
+    // is stripped so the transcript reads like the customer actually saw it.
+    const transcriptRows = (!toCustomer && Array.isArray(opts.transcript))
+        ? opts.transcript
+            .filter(m => m && typeof m.content === "string" && m.content.trim())
+            .map(m => {
+                const who = (m.role === "assistant" || m.role === "model") ? "Asszisztens" : "Ügyfél";
+                const clean = m.content.replace(/<!--DATA:.*?-->/s, "").replace(/<!--CHIPS:.*?-->/s, "").trim();
+                if (!clean) return "";
+                return `<p style="margin:0 0 10px"><b>${who}:</b><br>${esc(clean).replace(/\n/g, "<br>")}</p>`;
+            }).join("")
+        : "";
+    const transcriptBlock = transcriptRows ? `
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+        <h3 style="margin:0 0 8px">Teljes beszélgetés</h3>
+        <div style="font-size:13px;color:#374151">${transcriptRows}</div>` : "";
 
     // Client-details block is only included in the owner's copy.
     const clientBlock = toCustomer ? "" : `
@@ -1971,6 +1994,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         </table>
         ${toCustomer ? "" : `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af">Fajlagos: ~${formatHuf(quote.perM2)}/m² nettó (kisebb terület esetén magasabb a fix költségek miatt)</p>`}
         <p style="margin:16px 0 0;font-size:12px;color:#6b7280">${esc(E.footnote)}${toCustomer ? " " + PHONE : ""}</p>
+        ${transcriptBlock}
       </div>
     </div>`;
 

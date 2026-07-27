@@ -44,7 +44,14 @@
       placeholder: "Írja be a válaszát – vagy kérdezzen bátran…",
       inputAria: "Írja be a válaszát vagy kérdését",
       dialogAria: "NM Bau árajánló asszisztens",
-      greeting: `Üdvözlöm az **${BRAND}** **felújítási** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.`,
+      greeting: `Üdvözlöm az **${BRAND}** **felújítási** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**. \n\n💬 **Bármit megkérdezhet** – árakról, anyagokról, határidőkről, vagy bármi másról!`,
+      exampleQuestions: [
+        "Mennyibe kerül egy fürdőszoba felújítás?",
+        "Mennyi ideig tart egy teljes lakásfelújítás?",
+        "Milyen anyagokat használtok?",
+      ],
+      questionHint: "💬 Kérdezzen bátran – pl. árakról, anyagokról, határidőkről",
+      conceptNotice: "⚠️ Ez egy előzetes, tájékoztató jellegű koncepció-kalkuláció, NEM végleges árajánlat. A pontos ár a helyszíni felméréssel alakul ki.",
       kickoff: "Szeretnék árajánlatot egy felújításra.",
       estLabel: "Becsült ár",
       estPartial: "pontosítással szűkül (nettó)",
@@ -79,7 +86,14 @@
       placeholder: "Type your answer – or ask us anything…",
       inputAria: "Type your answer or question",
       dialogAria: "NM Bau quote assistant",
-      greeting: `Welcome to the **${BRAND}** **renovation** quote assistant! Based on a few questions I'll prepare your **preliminary quote**.`,
+      greeting: `Welcome to the **${BRAND}** **renovation** quote assistant! Based on a few questions I'll prepare your **preliminary quote**.\n\n💬 **Feel free to ask anything** – about prices, materials, timelines, or anything else!`,
+      exampleQuestions: [
+        "How much does a bathroom renovation cost?",
+        "How long does a full flat renovation take?",
+        "What materials do you use?",
+      ],
+      questionHint: "💬 Ask us anything – e.g. about prices, materials, timelines",
+      conceptNotice: "⚠️ This is a preliminary, indicative concept calculation, NOT a final quote. The exact price is set after an on-site survey.",
       kickoff: "I'd like a quote for a renovation.",
       estLabel: "Estimated price",
       estPartial: "narrows as you refine (net)",
@@ -114,7 +128,14 @@
       placeholder: "Geben Sie Ihre Antwort ein – oder fragen Sie uns…",
       inputAria: "Geben Sie Ihre Antwort oder Frage ein",
       dialogAria: "NM Bau Angebotsassistent",
-      greeting: `Willkommen beim **${BRAND}** **Renovierungs**-Angebotsassistenten! Anhand einiger Fragen erstelle ich Ihr **vorläufiges Angebot**.`,
+      greeting: `Willkommen beim **${BRAND}** **Renovierungs**-Angebotsassistenten! Anhand einiger Fragen erstelle ich Ihr **vorläufiges Angebot**.\n\n💬 **Fragen Sie uns gerne alles** – zu Preisen, Materialien, Zeitrahmen oder was auch immer!`,
+      exampleQuestions: [
+        "Was kostet eine Badsanierung?",
+        "Wie lange dauert eine komplette Wohnungsrenovierung?",
+        "Welche Materialien verwendet ihr?",
+      ],
+      questionHint: "💬 Fragen Sie uns alles – z. B. zu Preisen, Materialien, Zeitrahmen",
+      conceptNotice: "⚠️ Dies ist eine vorläufige, unverbindliche Konzept-Kalkulation, KEIN endgültiges Angebot. Der genaue Preis wird nach einer Vor-Ort-Besichtigung festgelegt.",
       kickoff: "Ich hätte gerne ein Angebot für eine Renovierung.",
       estLabel: "Geschätzter Preis",
       estPartial: "wird durch Angaben enger (netto)",
@@ -410,6 +431,11 @@
     header.appendChild(textBlock);
     header.appendChild(actions);
 
+    // ---- Concept/demo disclaimer (always visible - this is NOT a final quote) ----
+    const conceptBanner = document.createElement("div");
+    conceptBanner.className = "faq-concept-banner";
+    conceptBanner.textContent = t().conceptNotice;
+
     // ---- Progress bar (how far through the questions) ----
     const progress = document.createElement("div");
     progress.className = "faq-progress";
@@ -456,13 +482,20 @@
     sendBtn.setAttribute("aria-label", "Küldés");
     sendBtn.innerHTML = ICON.send;
 
+    // ---- Question hint bar ----
+    const hintBar = document.createElement("div");
+    hintBar.className = "faq-question-hint";
+    hintBar.textContent = t().questionHint;
+
     inputBar.appendChild(inputElement);
     inputBar.appendChild(sendBtn);
 
     chatWindow.appendChild(header);
+    chatWindow.appendChild(conceptBanner);
     chatWindow.appendChild(progress);
     chatWindow.appendChild(estimateBarEl);
     chatWindow.appendChild(messagesContainer);
+    chatWindow.appendChild(hintBar);
     chatWindow.appendChild(inputBar);
 
     container.appendChild(chatWindow);
@@ -472,6 +505,18 @@
       started = true;
       track("quote_started");
       addMessage("bot", t().greeting);
+      // Show clickable example questions so visitors immediately see they can ask anything
+      if (t().exampleQuestions) {
+        const exWrap = document.createElement("div");
+        exWrap.className = "faq-chips faq-example-questions";
+        t().exampleQuestions.forEach((q) => {
+          const chip = makeChip(q);
+          chip.onclick = () => { exWrap.remove(); sendMessage(q); };
+          exWrap.appendChild(chip);
+        });
+        messagesContainer.appendChild(exWrap);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
       sendMessage(t().kickoff, true);
     }
   }
