@@ -258,6 +258,36 @@ function esc(s) {
         ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Render a chat history array as HTML for the OWNER e-mail, so he can read the
+// conversation exactly as the customer saw it. Everything is escaped, newlines
+// are preserved, and the model's own control blocks (<!--DATA:...-->,
+// <!--CHIPS:...-->) plus the [[SPLIT]] bubble markers are stripped out.
+// Chip clicks arrive as ordinary "user" messages, so a click-only conversation
+// renders exactly like a typed one.
+function transcriptHtml(rows) {
+    if (!Array.isArray(rows)) return "";
+    return rows
+        .filter((m) => m && typeof m.content === "string" && m.content.trim())
+        .map((m) => {
+            const who = (m.role === "assistant" || m.role === "model") ? "Asszisztens" : "Ügyfél";
+            const clean = m.content
+                .replace(/<!--DATA:.*?-->/gs, "")
+                .replace(/<!--CHIPS:.*?-->/gs, "")
+                .replace(/\[\[SPLIT\]\]/g, "\n\n")
+                .trim();
+            if (!clean) return "";
+            return `<p style="margin:0 0 10px"><b>${who}:</b><br>${esc(clean).replace(/\n/g, "<br>")}</p>`;
+        })
+        .join("");
+}
+
+// How many turns the customer actually took. The widget opens every conversation
+// with a hidden kickoff line, so 1 means "opened the chat and did nothing".
+function customerTurns(rows) {
+    if (!Array.isArray(rows)) return 0;
+    return rows.filter((m) => m && m.role === "user" && typeof m.content === "string" && m.content.trim()).length;
+}
+
 // Best-effort client IP from the proxy headers Vercel sets.
 function clientIp(req) {
     const xf = req.headers && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]);
@@ -283,6 +313,10 @@ function rateLimit(key, limit, windowMs) {
 // enough that a script can't drain the LLM budget or blast e-mails.
 const RL_CHAT = { limit: Number(process.env.RL_CHAT_PER_MIN) || 30, windowMs: 60_000 };
 const RL_EMAIL = { limit: Number(process.env.RL_EMAIL_PER_HOUR) || 5, windowMs: 60 * 60_000 };
+// Owner transcript copies + the self-test both go to the OWNER's own address
+// only, so these are about inbox noise, not about protecting third parties.
+const RL_TRANSCRIPT = { limit: Number(process.env.RL_TRANSCRIPT_PER_HOUR) || 20, windowMs: 60 * 60_000 };
+const RL_SELFTEST = { limit: Number(process.env.RL_SELFTEST_PER_HOUR) || 6, windowMs: 60 * 60_000 };
 
 // Payload shape/size caps - reject oversized or malformed bodies before we ever
 // call the model (token-cost protection) and strip client-injected system turns.
@@ -1711,16 +1745,109 @@ async function callGemini(messages) {
 }
 
 // ---------------------------------------------------------------------------
+//  SELF-TEST - "did the e-mail actually go out?" without guessing.
+//  GET /api/faq-agent?selftest=1  ->  JSON report + a real test e-mail to the
+//  owner address. Nothing secret is echoed back: keys are reported as present/
+//  missing only, and the destination address is masked.
+// ---------------------------------------------------------------------------
+function maskEmail(a) {
+    const s = String(a || "");
+    const at = s.indexOf("@");
+    if (at < 1) return s ? "***" : "(nincs beállítva)";
+    const user = s.slice(0, at);
+    return `${user.slice(0, 2)}${"*".repeat(Math.max(1, user.length - 2))}${s.slice(at)}`;
+}
+
+const SELFTEST_CONVERSATION = [
+    { role: "user", content: "Szeretnék árajánlatot egy felújításra." },
+    { role: "assistant", content: "Üdvözlöm! Milyen felújítást tervez?" },
+    { role: "user", content: "Fürdőszoba" },
+    { role: "assistant", content: "Rendben. Mekkora a fürdőszoba?" },
+    { role: "user", content: "4-6 m²" },
+    { role: "assistant", content: "És milyen kivitelezési szintre gondolt?" },
+    { role: "user", content: "Közepes" },
+];
+
+async function runSelfTest(request, response, ip) {
+    response.setHeader("Cache-Control", "no-store");
+
+    const given = String((request.query && request.query.selftest) || "");
+    const wanted = (process.env.OWNER_TEST_KEY || "").trim();
+    if (wanted && !safeEqualStr(given, wanted)) {
+        return response.status(401).json({ ok: false, error: "Rossz vagy hiányzó selftest kulcs." });
+    }
+
+    const rl = rateLimit(`selftest:${ip}`, RL_SELFTEST.limit, RL_SELFTEST.windowMs);
+    if (!rl.ok) {
+        response.setHeader("Retry-After", String(rl.retryAfter));
+        return response.status(429).json({ ok: false, error: `Túl sok teszt. Próbáld újra ${rl.retryAfter} másodperc múlva.` });
+    }
+
+    const to = process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com";
+    const checks = {
+        RESEND_API_KEY: process.env.RESEND_API_KEY ? "beállítva" : "HIÁNYZIK",
+        LEAD_EMAIL_TO: to ? maskEmail(to) : "HIÁNYZIK",
+        LEAD_EMAIL_FROM: process.env.LEAD_EMAIL_FROM || "(alapértelmezett: NM Bau <ajanlat@send.traumbad.hu>)",
+        OWNER_TEST_KEY: wanted ? "beállítva (kulcs kell a teszthez)" : "nincs beállítva (a teszt bárkinek elérhető, de csak neked küld)",
+        EMAIL_OFFER: EMAIL_OFFER_ENABLED ? "on" : "off",
+    };
+
+    const sent = await sendTranscriptEmail(
+        { projectType: "furdo", size: "4-6", tier: "mid", washing: "kad", name: "Teszt Elek", phone: "+36 30 000 0000" },
+        SELFTEST_CONVERSATION,
+        { lang: "hu", test: true, sessionId: "selftest", reason: "manuális teszt" }
+    );
+
+    return response.status(sent.ok ? 200 : 500).json({
+        ok: !!sent.ok,
+        message: sent.ok
+            ? `Teszt e-mail elküldve ide: ${maskEmail(to)}. Nézd meg a postafiókot (a spam mappát is).`
+            : "Az e-mail küldés NEM sikerült. A 'resendError' mezőben ott az ok.",
+        resendId: sent.id || null,
+        resendError: sent.ok ? null : sent.error,
+        checks,
+    });
+}
+
+// Constant-time compare for the self-test key.
+function safeEqualStr(a, b) {
+    a = String(a == null ? "" : a); b = String(b == null ? "" : b);
+    if (a.length !== b.length) return false;
+    let r = 0;
+    for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return r === 0;
+}
+
+// ---------------------------------------------------------------------------
 //  Handler
 // ---------------------------------------------------------------------------
 export default async function handler(request, response) {
     applyCors(request, response);
 
     if (request.method === "OPTIONS") return response.status(204).end();
+
+    // The transcript beacon is sent with navigator.sendBeacon as text/plain (so
+    // it survives the page closing without a CORS preflight), which means the
+    // body arrives as a raw string instead of a parsed object.
+    if (typeof request.body === "string") {
+        try { request.body = JSON.parse(request.body); } catch (e) { request.body = {}; }
+    }
+
+    const ip = clientIp(request);
+
+    // --- SELF-TEST: open /api/faq-agent?selftest=1 in a browser to check the
+    // whole e-mail path end to end. It reports which environment variables are
+    // present and what Resend actually answered, then sends a sample transcript
+    // to LEAD_EMAIL_TO. It can NEVER send to an address from the URL, and it is
+    // rate-limited, so the worst an outsider could do is mail the owner himself.
+    // Set OWNER_TEST_KEY in the environment to require ?selftest=<that value>. ---
+    if (request.method === "GET" && request.query && request.query.selftest != null) {
+        return await runSelfTest(request, response, ip);
+    }
+
     // This is a JSON POST API - reject everything else outright.
     if (request.method !== "POST") return response.status(405).json({ answer: "Method Not Allowed" });
 
-    const ip = clientIp(request);
     // Customer's UI language (synced from the host site: hu | en | de). Drives
     // chips, recap, quote prose and the AI's reply language. Owner e-mail/logs
     // stay Hungarian.
@@ -1728,6 +1855,39 @@ export default async function handler(request, response) {
 
     try {
         const { question, history, action, lead } = request.body || {};
+
+        // --- ACTION: send the owner the whole conversation ---
+        // Fired by the widget when a conversation ENDS WITHOUT a finished quote
+        // (page closed / hidden, chat closed, or 3 minutes idle). The completed
+        // -quote mail further down already carries its own transcript, so this
+        // one is purely about the drop-offs. Chip-only conversations come through
+        // here exactly like typed ones - a chip click is a normal user message.
+        if (action === "transcript") {
+            const body = request.body || {};
+            const rl = rateLimit(`transcript:${ip}`, RL_TRANSCRIPT.limit, RL_TRANSCRIPT.windowMs);
+            if (!rl.ok) {
+                response.setHeader("Retry-After", String(rl.retryAfter));
+                return response.status(429).json({ ok: false, error: "rate_limited" });
+            }
+            const bad = validateChatInput(null, history);
+            if (bad) return response.status(400).json({ ok: false, error: "invalid_history" });
+            // 1 turn = the hidden kickoff line only, i.e. they opened the chat and
+            // did nothing. Don't mail those; anything from one answer up, do.
+            if (customerTurns(history) < 2) return response.status(200).json({ ok: false, skipped: "no_answers" });
+
+            const priorSel = Array.isArray(history)
+                ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => stripManaged(extractData(m.content)))
+                : [];
+            const sel = sanitizeChoices(mergeState(body.state, ...priorSel));
+            const sent = await sendTranscriptEmail(sel, history, {
+                lang,
+                sessionId: body.sessionId,
+                pageUrl: body.pageUrl,
+                reason: body.reason,
+                update: !!body.update,
+            });
+            return response.status(200).json({ ok: !!sent.ok });
+        }
 
         // --- ACTION: customer asked us to e-mail them the quote ---
         // SECURITY: the client sends back the whole `lead`, so we trust NOTHING in
@@ -1874,14 +2034,21 @@ export default async function handler(request, response) {
             console.log(`Becsült sáv: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`);
             console.log("========================================\n");
 
+            // The quote bubbles the customer is about to see are the last turn of
+            // the conversation, so append them - otherwise the owner's transcript
+            // stops one message short and never shows the price that was quoted.
+            const customerAnswer = renderCustomerQuote(quote, sel, lang);
             await sendQuoteEmail(sel, quote, {
                 to: process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com",
                 toCustomer: false,
-                transcript: Array.isArray(history) ? history : [],
+                transcript: [
+                    ...(Array.isArray(history) ? history : []),
+                    { role: "assistant", content: customerAnswer },
+                ],
             });
 
             return response.status(200).json({
-                answer: renderCustomerQuote(quote, sel, lang),
+                answer: customerAnswer,
                 chips: [],
                 emailOffer: EMAIL_OFFER_ENABLED,
                 lead: { sel, quote },
@@ -1936,18 +2103,9 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         .join("");
 
     // Full chat transcript - owner copy only, so the recipient can see exactly
-    // what the customer said (not just the extracted fields). Plain text is
-    // escaped and newlines preserved; the AI's own <!--DATA:...--> state block
-    // is stripped so the transcript reads like the customer actually saw it.
+    // what the customer said (not just the extracted fields).
     const transcriptRows = (!toCustomer && Array.isArray(opts.transcript))
-        ? opts.transcript
-            .filter(m => m && typeof m.content === "string" && m.content.trim())
-            .map(m => {
-                const who = (m.role === "assistant" || m.role === "model") ? "Asszisztens" : "Ügyfél";
-                const clean = m.content.replace(/<!--DATA:.*?-->/s, "").replace(/<!--CHIPS:.*?-->/s, "").trim();
-                if (!clean) return "";
-                return `<p style="margin:0 0 10px"><b>${who}:</b><br>${esc(clean).replace(/\n/g, "<br>")}</p>`;
-            }).join("")
+        ? transcriptHtml(opts.transcript)
         : "";
     const transcriptBlock = transcriptRows ? `
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
@@ -2004,21 +2162,111 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         ? E.subject(formatHuf(quote.low), formatHuf(quote.high))
         : `[ÚJ ÁRAJÁNLAT] ${flow} - ${oneLine(sel.postal_code)} - ${oneLine(sel.name)} - ${formatHuf(quote.low)}–${formatHuf(quote.high)}`;
 
-    try {
-        const emailRes = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${resendKey}` },
-            body: JSON.stringify({ from: fromEmail, to: [toEmail], subject, html }),
-        });
-        const result = await emailRes.json();
-        if (emailRes.ok) {
-            console.log(`✅ Árajánlat e-mail elküldve (${toCustomer ? "ügyfél" : "tulajdonos"}):`, result.id);
-            return true;
-        }
-        console.error("❌ Resend hiba:", JSON.stringify(result));
-        return false;
-    } catch (emailErr) {
-        console.error("❌ Nem sikerült elküldeni az e-mailt:", emailErr.message);
-        return false;
+    const sent = await resendSend({ from: fromEmail, to: toEmail, subject, html });
+    if (sent.ok) {
+        console.log(`✅ Árajánlat e-mail elküldve (${toCustomer ? "ügyfél" : "tulajdonos"}):`, sent.id);
+        return true;
     }
+    console.error("❌ Resend hiba:", sent.error);
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+//  Low-level Resend call. Returns { ok, id } or { ok:false, error, status } so
+//  callers (and the /api/faq-agent?selftest=1 diagnostic) can report the REAL
+//  reason a mail failed - unverified domain, bad key, wrong sender, etc.
+// ---------------------------------------------------------------------------
+async function resendSend({ from, to, subject, html }) {
+    const key = (process.env.RESEND_API_KEY || "").trim();
+    if (!key) return { ok: false, error: "RESEND_API_KEY nincs beállítva a környezetben." };
+    if (/[^\x20-\x7E]/.test(key)) return { ok: false, error: "A RESEND_API_KEY nem ASCII karaktereket tartalmaz (valószínűleg a kimaszkolt pontokat másoltad be)." };
+    if (!to) return { ok: false, error: "Nincs címzett (LEAD_EMAIL_TO)." };
+    try {
+        const res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+            body: JSON.stringify({ from, to: [to], subject, html }),
+        });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok) return { ok: true, id: result.id };
+        return { ok: false, status: res.status, error: (result && (result.message || result.name)) || JSON.stringify(result) };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  OWNER TRANSCRIPT E-MAIL - fires for conversations that never reach a finished
+//  quote (the customer dropped off, or just asked questions). The quote e-mail
+//  above only ever fires on completion, so without this the owner never sees the
+//  people who bailed halfway - which is most of them.
+// ---------------------------------------------------------------------------
+async function sendTranscriptEmail(sel, transcript, meta = {}) {
+    const toEmail = process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com";
+    const fromEmail = process.env.LEAD_EMAIL_FROM || "NM Bau <ajanlat@send.traumbad.hu>";
+    const s = sel && typeof sel === "object" ? sel : {};
+
+    const rows = transcriptHtml(transcript);
+    if (!rows) return { ok: false, error: "Üres beszélgetés - nincs mit küldeni." };
+
+    // Everything we managed to learn before they stopped. Empty fields are left
+    // out entirely rather than shown as "-", so the mail is short and readable.
+    const pairs = [];
+    if (s.name) pairs.push(["Név", s.name]);
+    if (s.phone) pairs.push(["Telefon", s.phone]);
+    if (s.email) pairs.push(["E-mail", s.email]);
+    if (s.postal_code) pairs.push(["Irányítószám", s.postal_code]);
+    if (s.budget) pairs.push(["Tervezett keret", s.budget]);
+    if (s.timeline) pairs.push(["Tervezett kivitelezés", lbl("timeline", s.timeline)]);
+    if (s.projectType) {
+        for (const [k, v] of summaryPairs(s, "hu")) {
+            const val = String(v == null ? "" : v).trim();
+            if (val && val !== "-") pairs.push([k, val]);
+        }
+    }
+    const knownBlock = pairs.length
+        ? pairs.map(([k, v]) => `<p style="margin:4px 0"><b>${esc(k)}:</b> ${esc(v)}</p>`).join("")
+        : `<p style="margin:4px 0;color:#6b7280">Még semmit nem adott meg.</p>`;
+
+    const est = runningEstimate(s);
+    const estBlock = est
+        ? `<p style="margin:8px 0 0"><b>Futó becslés:</b> kb. ${formatHuf(est.low)} – ${formatHuf(est.high)}${est.partial ? " (részleges)" : ""}</p>`
+        : "";
+
+    const turns = customerTurns(transcript);
+    const flow = FLOW_LABEL[s.projectType] || "Nincs megadva projekt";
+    const when = new Date().toLocaleString("hu-HU", { timeZone: "Europe/Budapest" });
+    const oneLine = (x) => String(x == null ? "" : x).replace(/[\r\n]+/g, " ").trim().slice(0, 120);
+    const metaBlock = `
+        <p style="margin:4px 0;font-size:12px;color:#6b7280">Időpont: ${esc(when)} · Nyelv: ${esc(normLang(meta.lang))} · Ügyfél válaszai: ${turns - 1 > 0 ? turns - 1 : 0} · Beszélgetés-azonosító: ${esc(oneLine(meta.sessionId) || "-")}</p>
+        ${meta.pageUrl ? `<p style="margin:4px 0;font-size:12px;color:#6b7280">Oldal: ${esc(oneLine(meta.pageUrl))}</p>` : ""}
+        ${meta.reason ? `<p style="margin:4px 0;font-size:12px;color:#6b7280">Kiváltó esemény: ${esc(oneLine(meta.reason))}</p>` : ""}`;
+
+    const title = meta.test ? "TESZT - beszélgetés másolat" : "Befejezetlen beszélgetés";
+    const html = `
+    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#111827">
+      <div style="background:#1C1917;color:#ffffff;padding:20px 24px;border-radius:12px 12px 0 0;border-bottom:3px solid #B8860B">
+        <h2 style="margin:0">${esc(title)} - NM Bau</h2>
+      </div>
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
+        <p style="margin:0 0 12px;color:#6b7280">${meta.test
+            ? "Ez egy teszt e-mail, amit te magad indítottál. Ha ez megérkezett, az e-mail küldés működik."
+            : "Ez a beszélgetés nem jutott el a kész árajánlatig, de az érdeklődő elmondta, amit lent olvasol."}</p>
+        <h3 style="margin:0 0 8px">Amit eddig tudunk (${esc(flow)})</h3>
+        ${knownBlock}${estBlock}
+        ${metaBlock}
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+        <h3 style="margin:0 0 8px">Teljes beszélgetés</h3>
+        <div style="font-size:13px;color:#374151">${rows}</div>
+      </div>
+    </div>`;
+
+    const who = s.name ? ` - ${oneLine(s.name)}` : "";
+    const tag = meta.test ? "[TESZT]" : "[BESZÉLGETÉS]";
+    const subject = `${tag} ${flow}${who} - ${turns - 1 > 0 ? turns - 1 : 0} válasz${meta.update ? " (frissítés)" : ""}`;
+
+    const sent = await resendSend({ from: fromEmail, to: toEmail, subject, html });
+    if (sent.ok) console.log(`✅ Beszélgetés-másolat elküldve a tulajdonosnak:`, sent.id);
+    else console.error("❌ Beszélgetés-másolat hiba:", sent.error);
+    return sent;
 }

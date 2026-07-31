@@ -145,11 +145,12 @@ inflation:
    - `GEMINI_API_KEY` / `GEMINI_MODEL` — Google AI Studio
    - `OPENAI_API_KEY` / `OPENAI_MODEL` — the task is tiny, cheapest tier is plenty
    - `RESEND_API_KEY` — free at <https://resend.com>
-   - `LEAD_EMAIL_TO` — where quotes are sent (default `pirint.milan@gmail.com`)
-   - `LEAD_EMAIL_FROM` — keep `onboarding@resend.dev` to start; later verify your
-     own domain and set e.g. `NM Bau <ajanlat@yourdomain.hu>`
+   - `LEAD_EMAIL_TO` — where quotes are sent (default `traumbaddesign@gmail.com`)
+   - `LEAD_EMAIL_FROM` — `NM Bau <ajanlat@send.traumbad.hu>` (verified Resend domain)
    - `EMAIL_OFFER=on` — *(optional)* offer to e-mail the quote to the customer too
      (needs a verified sending domain first)
+   - `OWNER_TEST_KEY` — *(optional)* password for the self-test URL below. Unset =
+     the self-test is open, but it can only ever mail `LEAD_EMAIL_TO`.
 2. **Run locally:** `node server.js` → <http://localhost:8888>
 3. **Deploy (Vercel):** push the repo; set the same env vars. `api/faq-agent.js`
    is the serverless endpoint, `public/` is static.
@@ -163,6 +164,49 @@ inflation:
    </script>
    <script src="https://YOUR-APP.vercel.app/widget.js"></script>
    ```
+
+---
+
+## What the owner gets by e-mail
+
+Two different mails, both to `LEAD_EMAIL_TO`, both containing the **full chat
+transcript** (chip clicks included — a chip click is an ordinary user message):
+
+| When | Subject starts with | Contains |
+|---|---|---|
+| The visitor finishes the flow | `[ÚJ ÁRAJÁNLAT]` | contact details, itemised quote, transcript |
+| The visitor stops before finishing | `[BESZÉLGETÉS]` | everything answered so far, running estimate, transcript |
+
+The second one is the important one: most people never reach the end, and
+without it they were invisible. The widget sends it when the conversation ends
+without a quote — chat closed (20 s grace, cancelled if they reopen), tab/page
+closed or backgrounded, 3 minutes idle, or a language switch (which wipes the
+conversation). At most 3 copies per conversation, and never if the visitor only
+opened the chat without answering anything.
+
+### Testing it yourself
+
+**1. Is e-mail sending working at all?** Open in a browser:
+
+```
+https://YOUR-APP.vercel.app/api/faq-agent?selftest=1
+```
+
+It sends a sample conversation to `LEAD_EMAIL_TO` and returns JSON saying
+whether Resend accepted it — including the actual error if not (invalid key,
+unverified domain, …). If `OWNER_TEST_KEY` is set, use `?selftest=YOUR_KEY`.
+Locally: <http://localhost:8888/api/faq-agent?selftest=1>.
+
+**2. Does a real conversation arrive?** Open the widget, click a few options,
+then either close the chat and wait ~20 seconds, or close the tab. To skip the
+wait, run this in the browser console:
+
+```js
+NMBAU.sendTranscriptNow()
+```
+
+If nothing arrives, check the spam folder first, then the Vercel function logs —
+every failure is logged with the reason Resend gave.
 
 ---
 

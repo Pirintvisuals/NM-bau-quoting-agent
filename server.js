@@ -12,9 +12,15 @@ const __dirname = path.dirname(__filename);
 try {
     const envFile = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
     envFile.split('\n').forEach(line => {
-        const [key, value] = line.split('=');
-        if (key && value) {
-            process.env[key.trim()] = value.trim();
+        const eq = line.indexOf('=');
+        if (eq < 1 || line.trim().startsWith('#')) return;
+        const key = line.slice(0, eq).trim();
+        const value = line.slice(eq + 1).trim(); // keep '=' inside API keys intact
+        // A real environment variable wins over the .env file (standard dotenv
+        // behaviour) - lets you run e.g. RESEND_API_KEY=... node server.js to
+        // test without touching the file.
+        if (key && value && process.env[key] === undefined) {
+            process.env[key] = value;
         }
     });
 } catch (error) {
@@ -50,6 +56,26 @@ const server = http.createServer(async (req, res) => {
     }
 
 
+
+    // Self-test / diagnostics: GET /api/faq-agent?selftest=1
+    if (req.url.startsWith('/api/faq-agent') && req.method === 'GET') {
+        const u = new URL(req.url, `http://${req.headers.host}`);
+        req.query = Object.fromEntries(u.searchParams.entries());
+        res.status = (code) => { res.statusCode = code; return res; };
+        res.json = (data) => {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(data, null, 2));
+            return res;
+        };
+        try {
+            await handler(req, res);
+        } catch (error) {
+            console.error('Selftest error:', error.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: error.message }));
+        }
+        return;
+    }
 
     // Handle API endpoint
     if (req.url === '/api/faq-agent' && req.method === 'POST') {

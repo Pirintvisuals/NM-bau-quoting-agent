@@ -230,6 +230,83 @@
 
   let container = null;
 
+  // --- Owner transcript copy ------------------------------------------------
+  // The backend only e-mails the owner when a quote is FINISHED. Most visitors
+  // stop before that, so we also push the whole conversation to the owner when
+  // it ends WITHOUT a quote: chat closed, page closed/hidden, or 3 minutes idle.
+  // A chip click is an ordinary user message, so a click-only conversation is
+  // captured exactly like a typed one.
+  const TRANSCRIPT_IDLE_MS = 3 * 60 * 1000; // "they've stopped answering"
+  const TRANSCRIPT_CLOSE_MS = 20 * 1000;    // grace period after closing the chat
+  const TRANSCRIPT_MAX_SENDS = 3;           // cap so one visitor can't spam the inbox
+  let sessionId = newSessionId();
+  let transcriptSends = 0;
+  let transcriptSentAt = 0; // conversationHistory.length at the last copy sent
+  let idleTimer = null, closeTimer = null;
+
+  function newSessionId() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID().slice(0, 8); } catch (e) {}
+    return Math.random().toString(36).slice(2, 10);
+  }
+
+  // Send the owner everything said so far. Safe to call repeatedly - it skips
+  // when there's nothing new, when the quote already went out (that e-mail
+  // carries its own transcript), or when the visitor never actually answered.
+  function flushTranscript(reason) {
+    if (quoteDone) return;
+    if (transcriptSends >= TRANSCRIPT_MAX_SENDS) return;
+    // 1 user message = the hidden kickoff line only, i.e. they opened the chat
+    // and did nothing. From one real answer (typed OR clicked) upwards, send it.
+    const userTurns = conversationHistory.filter((m) => m.role === "user").length;
+    if (userTurns < 2) return;
+    if (conversationHistory.length <= transcriptSentAt) return;
+
+    const payload = JSON.stringify({
+      action: "transcript",
+      history: conversationHistory.slice(-40), // backend caps history at 40 msgs
+      state: convState,
+      lang: LANG,
+      sessionId: sessionId,
+      pageUrl: location.href,
+      reason: reason || "",
+      update: transcriptSends > 0,
+    });
+    transcriptSends++;
+    transcriptSentAt = conversationHistory.length;
+
+    // sendBeacon is the only thing that reliably survives the page closing.
+    // text/plain keeps it a "simple" request so it never needs a CORS preflight
+    // (a beacon can't do one) - the backend parses a string body as JSON for
+    // exactly this reason. fetch+keepalive is the fallback.
+    try {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([payload], { type: "text/plain;charset=UTF-8" });
+        if (navigator.sendBeacon(apiUrl, blob)) return;
+      }
+    } catch (e) {}
+    try {
+      fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
+  function armIdleFlush() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => flushTranscript("3 perc tétlenség"), TRANSCRIPT_IDLE_MS);
+  }
+
+  // Leaving the page is final - send immediately, no grace period.
+  function watchPageExit() {
+    window.addEventListener("pagehide", () => flushTranscript("oldal elhagyva"));
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushTranscript("lap háttérbe került");
+    });
+  }
+
   // Rotating teaser questions shown in the always-on bubble next to the launcher.
   // Varied angles (price, speed, specific trades, CTA) so it stays interesting
   // and invites a click. The actual text comes from STRINGS[LANG].teasers.
@@ -366,10 +443,15 @@
       chatOpen = false;
       if (launcher) launcher.classList.remove("active");
       track("chat_closed", { answered: lastProgress, total: lastProgressTotal });
+      // Closing usually means "I'm done" - send the owner the conversation after
+      // a short grace period, cancelled below if they reopen it.
+      if (closeTimer) clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => flushTranscript("csevegés bezárva"), TRANSCRIPT_CLOSE_MS);
       // Bring the rotating teaser back so the launcher never sits there silent.
       setTimeout(() => showTeaser(), 400);
     } else {
       hideTeaser();
+      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; } // they came back
       if (!chatWindow) {
         openChat(); // build once (also fires the greeting + first question)
       } else {
@@ -790,6 +872,8 @@
       } else {
         renderChips(data.chips);
       }
+      // Restart the "they stopped answering" clock after every exchange.
+      armIdleFlush();
     } catch (err) {
       console.error(err);
       removeThinking();
@@ -821,6 +905,14 @@
   // start the conversation over in the new language.
   function resetConversation() {
     const wasOpen = chatOpen;
+    // A language switch throws the conversation away - send it to the owner
+    // first, otherwise everything the visitor already said is lost.
+    flushTranscript("nyelvváltás");
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    sessionId = newSessionId();
+    transcriptSends = 0;
+    transcriptSentAt = 0;
     conversationHistory = [];
     convState = {};
     started = false;
@@ -878,6 +970,18 @@
     injectEstimateStyles();
     createLauncher();
     watchSiteLang();
+    watchPageExit();
+    // Manual test hook. Have a short conversation (clicking the options is
+    // enough), then run NMBAU.sendTranscriptNow() in the browser console - the
+    // owner copy goes out straight away instead of waiting for the idle timer.
+    window.NMBAU = window.NMBAU || {};
+    window.NMBAU.sendTranscriptNow = function () {
+      transcriptSends = 0;
+      transcriptSentAt = 0;
+      flushTranscript("kézi teszt");
+      return "Beszélgetés elküldve - nézd meg a postafiókot (a spam mappát is).";
+    };
+    window.NMBAU.getHistory = function () { return conversationHistory.slice(); };
     // Fires once per page where the widget loads -> "how many people see it".
     track("widget_loaded");
   }

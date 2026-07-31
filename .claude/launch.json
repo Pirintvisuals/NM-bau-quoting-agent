@@ -18,6 +18,24 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["C:\\Users\\pirin\\OneDrive\\Melékletek\\kecskemet quoting agent\\server.js"],
       "port": 8888
+    },
+    {
+      "name": "bathroom-touch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\Users\\pirin\\OneDrive\\Melékletek\\The Bathroom Touch\\server.js"],
+      "port": 8888
+    },
+    {
+      "name": "jjk-agent",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\Users\\pirin\\OneDrive\\Melékletek\\JJK quoting agent\\server.js"],
+      "port": 8888
+    },
+    {
+      "name": "magyar-demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "serve", "C:\\Users\\pirin\\OneDrive\\Mellékletek\\Magyar-demo", "-l", "5056"],
+      "port": 5056
     }
   ]
 }
