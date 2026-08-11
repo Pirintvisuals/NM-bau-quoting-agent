@@ -43,11 +43,23 @@ only the inputs that actually move the price:
 | 3 | Shower vs bath | `washing` | Walk‑in shower / cabin / bath / both — discrete fixture cost. |
 | 4 | Keep or move plumbing | `layout` | Relocating wet points adds significant plumbing work. |
 | 5 | Underfloor heating | `heating` | Discrete electric mat + thermostat add‑on. |
-| 6 | Budget band | `budget` | Lead qualification (does **not** affect the price). |
-| 7 | Timeline | `timeline` | Lead qualification (does **not** affect the price). |
+| 6 | Timeline | `timeline` | Lead qualification (does **not** affect the price). |
 
-Contact details (`name`, `email`, `phone`, `postal_code`) are asked **last**,
-only after the project is fully described (progress bar at 100%).
+### Question order is deliberate
+
+The backend owns the order — `fieldOrder()` in `api/faq-agent.js` is the single
+source of truth, and the model is told each turn which one question it may ask.
+
+1. **Project questions first.** Easy, low‑commitment clicks that build momentum;
+   the progress bar hits 100% here, so everything after feels like a bonus.
+2. **Contact next**, in friction order: `name` → `postal_code` → `email` →
+   `phone`. The postcode feels like it benefits them ("do you cover my area?");
+   the phone number — the one people balk at — comes last, at maximum sunk cost.
+   Each ask states *why* in one line; a stated reason measurably lifts compliance.
+3. **Budget last, and optional.** Asking early reads as a means test and invites
+   lowballing. By the end they've invested several minutes, and saying out loud
+   that it can be skipped *raises* the answer rate. It never affects the price,
+   so an unparseable answer is stored verbatim rather than blocking the quote.
 
 Every choice question has a **"Nem tudom"** option → the engine falls back to a
 sensible, **conservative** default (mid tier, 5 m², keep layout, the *cheaper*

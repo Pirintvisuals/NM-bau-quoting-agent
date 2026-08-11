@@ -281,6 +281,25 @@ function transcriptHtml(rows) {
         .join("");
 }
 
+// Same transcript as plain text, for the text/plain part of the owner e-mail.
+function transcriptText(rows) {
+    if (!Array.isArray(rows)) return "";
+    return rows
+        .filter((m) => m && typeof m.content === "string" && m.content.trim())
+        .map((m) => {
+            const who = (m.role === "assistant" || m.role === "model") ? "Asszisztens" : "Ügyfél";
+            const clean = m.content
+                .replace(/<!--DATA:.*?-->/gs, "")
+                .replace(/<!--CHIPS:.*?-->/gs, "")
+                .replace(/\[\[SPLIT\]\]/g, "\n")
+                .replace(/\*\*/g, "")
+                .trim();
+            return clean ? `${who}:\n${clean}\n` : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+}
+
 // How many turns the customer actually took. The widget opens every conversation
 // with a hidden kickoff line, so 1 means "opened the chat and did nothing".
 function customerTurns(rows) {
@@ -658,25 +677,37 @@ function refineFields(pt) {
     return [];
 }
 const hasRefine = (pt) => refineFields(pt).length > 0;
-const TAIL_FIELDS = ["budget", "timeline"];
-const CONTACT_FIELDS = ["name", "email", "phone", "postal_code"];
+const TAIL_FIELDS = ["timeline"];
+// Contact order is deliberate, lowest friction first: the name is safe to give,
+// the postal code feels like it benefits them ("do you cover my area?"), and the
+// phone number - the one people balk at - comes last, at maximum sunk cost.
+const CONTACT_FIELDS = ["name", "postal_code", "email", "phone"];
+// Budget is asked LAST - after the essentials, contact and any refine questions -
+// and it is OPTIONAL. Asking "what's your budget?" early reads as a filter and
+// scares people off before they've seen anything; by the end they've invested a
+// few minutes and it's a fair question. Skipping it costs nothing: the price is
+// computed from the project answers, never from the budget.
+const BUDGET_FIELD = "budget";
 
 // Full ordered field list for the current state. Until a project type is chosen,
 // the only question is projectType. For types with a refine stage, a gate question
 // ("shall we refine?") sits after contact; the refine fields are only required
-// once the customer opts in (refine_gate === "yes").
+// once the customer opts in (refine_gate === "yes"). Budget always comes last.
 function fieldOrder(sel) {
     const pt = sel && sel.projectType;
     if (!pt) return ["projectType"];
     const base = ["projectType", ...projectFields(pt, sel), ...TAIL_FIELDS, ...CONTACT_FIELDS];
-    if (!hasRefine(pt)) return base;
-    base.push("refine_gate");
-    if (sel.refine_gate === "yes") base.push(...refineFields(pt));
+    if (hasRefine(pt)) {
+        base.push("refine_gate");
+        if (sel.refine_gate === "yes") base.push(...refineFields(pt));
+    }
+    base.push(BUDGET_FIELD);
     return base;
 }
-// Fields that count toward the progress bar: the ESSENTIALS + budget + timeline.
-// Contact and the optional refine stage are deliberately excluded, so the bar hits
-// 100% when the core is done (and refining afterwards is framed as a bonus).
+// Fields that count toward the progress bar: the ESSENTIALS + timeline. Contact,
+// the optional refine stage and the optional budget question are deliberately
+// excluded, so the bar hits 100% when the core is done (and everything after is
+// framed as a bonus).
 function progressFields(sel) {
     const pt = sel && sel.projectType;
     if (!pt) return ["projectType"];
@@ -756,6 +787,7 @@ function budgetBandsFor(sel, lang = "hu") {
         w.range(fmtM(t2), fmtM(t3)),
         w.over(fmtM(t3)),
         w.unsure,
+        w.skip, // the question is optional - always offer a way out
     ];
     return { adaptive: true, chips, thresholds: [t1 * 1e6, t2 * 1e6, t3 * 1e6] };
 }
@@ -769,11 +801,24 @@ function resolveBudget(answer, sel, lang = "hu") {
     const b = budgetBandsFor(sel, lang);
     const hit = b.chips.find((c) => c.toLowerCase() === a.toLowerCase());
     if (hit) return hit; // store the (localized) band label the customer picked
+    // The question is optional: any way of declining counts as an answer, so the
+    // quote is never blocked by it.
+    if (/ink[aá]bb nem|nem mondan[aá]m|nem szeretn[eé]m megadni|rather not|lieber nicht|keine angabe|skip|kihagy/i.test(a)) {
+        return BUDGET_WORDS[normLang(lang)].skip;
+    }
     // "Not sure" in any of the three languages -> the localized unsure label.
-    if (/m[eé]g nem tud|not sure|wei(ß|ss) (noch )?nicht/i.test(a)) return BUDGET_WORDS[normLang(lang)].unsure;
+    if (/m[eé]g nem tud|nem tudom|not sure|wei(ß|ss) (noch )?nicht/i.test(a)) return BUDGET_WORDS[normLang(lang)].unsure;
     // Free-typed amount: store the parsed sum itself (language-neutral).
     const amt = parseBudgetAmount(a);
-    return amt != null && amt >= 50000 ? formatHuf(amt) : null;
+    if (amt != null && amt >= 50000) return formatHuf(amt);
+    // Budget is the LAST question, so an unparseable answer here would leave the
+    // customer stuck one step from their price. If it isn't a question, store it
+    // verbatim - the owner sees exactly what they wrote, and the number is never
+    // computed from the budget anyway. Real questions fall through so the model
+    // can answer them and re-ask.
+    const isQuestion = /\?/.test(a) ||
+        /^(mi|mit|mi[eé]rt|hogyan|mennyi|milyen|what|why|how|which|was|wie|warum|welche)\b/i.test(a);
+    return isQuestion ? null : a.slice(0, 120);
 }
 
 // Quick-reply chip labels per fixed-choice field.
@@ -994,6 +1039,72 @@ function nextChips(sel, lang = "hu") {
     return f ? chipsFor(f, sel, lang) : [];
 }
 
+// What each field is asking about, in one short phrase. Used to tell the model
+// - every single turn - exactly which question it is allowed to ask next.
+// Without this the model tracks its own position in the script and the backend
+// tracks another, and the two drift apart: the text asks about the timeline
+// while the buttons still offer budget bands. The backend owns the order.
+const FIELD_TOPIC = {
+    projectType: "mit szeretne felújítani (fürdő / konyha / lakás / ház / szoba)",
+    size: "a helyiség vagy ingatlan mérete négyzetméterben",
+    tier: "a kivitelezési szint (alap / közepes / prémium)",
+    washing: "zuhanyzót vagy kádat szeretne-e",
+    layout: "marad-e a mostani elrendezés, vagy áthelyezzük a vizes pontokat",
+    heating: "kér-e elektromos padlófűtést",
+    scope: "milyen mély felújítás kell (teljes / részleges / kozmetikai)",
+    roomscope: "mit szeretne a szobával (csak festés / festés + padló / teljes)",
+    bathrooms: "hány fürdőszoba vagy WC van",
+    kitchen: "mi legyen a konyhával",
+    furniture: "kell-e új konyhabútor és munkalap",
+    kitchen_fm: "milyen hosszú a konyhabútor folyóméterben",
+    appliances: "kér-e beépített gépeket",
+    windows: "kell-e ablakcsere",
+    heatingsys: "kell-e fűtéskorszerűsítés",
+    walls: "mozgatunk-e falakat vagy vizes pontokat",
+    condition: "az ingatlan jelenlegi állapota",
+    floortile: "a padló inkább csempe vagy laminált/parketta lesz",
+    klima: "kér-e klímát",
+    refine_gate: "szeretné-e pontosítani az árat néhány gyors kérdéssel",
+    timeline: "mikorra szeretné a kivitelezést",
+    name: "az ügyfél neve",
+    postal_code: "az ingatlan irányítószáma",
+    email: "az ügyfél e-mail címe",
+    phone: "az ügyfél telefonszáma",
+    budget: "a tervezett keretösszeg - PONTOSAN ezzel a felütéssel kérdezd: \"Ahhoz, hogy el tudjuk küldeni az árajánlatot, kérem, határozza meg a keret összegét.\" Ne ajánlgasd, hogy kihagyható",
+};
+
+// The per-turn steering line appended to the system prompt.
+function nextQuestionDirective(field, lang) {
+    if (!field) return "";
+    const topic = FIELD_TOPIC[field] || field;
+    const langName = { hu: "magyarul", en: "angolul", de: "németül" }[normLang(lang)] || "magyarul";
+    return `
+
+=== A JELENLEGI KÉRDÉS (a rendszer határozza meg - EZ FELÜLÍR MINDEN MÁST) ===
+A következő üzenetedben KIZÁRÓLAG EZT kérdezd meg: ${topic}.
+- Ha az ügyfél kérdezett valamit, ELŐSZÖR válaszolj a kérdésére 1-2 mondatban, és UGYANEBBEN az üzenetben tedd fel a fenti kérdést.
+- Ha az ügyfél válasza a fenti kérdésre értelmezhetetlen vagy nem oda tartozott, kérdezd meg ÚJRA a fenti kérdést, barátságosan.
+- SOHA ne ugorj a következő kérdésre, és SOHA ne tegyél fel ettől eltérő adatgyűjtő kérdést. A gombokat a rendszer ehhez a kérdéshez rakja ki, ezért ha mást kérdezel, rossz gombok jelennek meg.
+- A választ ${langName} írd.`;
+}
+
+// The model may return DATA values for fields the customer has not been asked
+// yet (it guesses ahead, or echoes an example from the prompt). Accepting those
+// makes the backend believe a question is already answered and jump the chips
+// forward - which is exactly how the buttons stopped matching the question on
+// screen. So a value only the MODEL supplied is kept only while nothing before
+// it is still unanswered.
+function dropSkipAhead(sel, trusted) {
+    const out = { ...sel };
+    const has = (o, k) => o && o[k] != null && String(o[k]).trim() !== "";
+    let gap = false;
+    for (const f of fieldOrder(out)) {
+        if (!has(out, f)) { gap = true; continue; }
+        if (gap && !has(trusted, f)) delete out[f];
+    }
+    return out;
+}
+
 // Human-readable Hungarian labels for the recap/e-mail. Fixed-token choice fields
 // only; `size` is handled by sizeLabel() since it can also be a free number.
 const LABELS = {
@@ -1200,9 +1311,9 @@ for (const pt of Object.keys(SIZE_VALUES)) {
 // Localized budget band words. Adaptive bands are built from these so a small
 // basic job and a big premium one show different amounts, in the right language.
 const BUDGET_WORDS = {
-    hu: { unit: "millió Ft", under: (s) => `${s} millió Ft alatt`, over: (s) => `${s} millió Ft felett`, range: (a, b) => `${a}–${b} millió Ft`, unsure: "Még nem tudom" },
-    en: { unit: "million Ft", under: (s) => `under ${s} million Ft`, over: (s) => `over ${s} million Ft`, range: (a, b) => `${a}–${b} million Ft`, unsure: "Not sure yet" },
-    de: { unit: "Mio. Ft", under: (s) => `unter ${s} Mio. Ft`, over: (s) => `über ${s} Mio. Ft`, range: (a, b) => `${a}–${b} Mio. Ft`, unsure: "Weiß noch nicht" },
+    hu: { unit: "millió Ft", under: (s) => `${s} millió Ft alatt`, over: (s) => `${s} millió Ft felett`, range: (a, b) => `${a}–${b} millió Ft`, unsure: "Még nem tudom", skip: "Inkább nem mondanám" },
+    en: { unit: "million Ft", under: (s) => `under ${s} million Ft`, over: (s) => `over ${s} million Ft`, range: (a, b) => `${a}–${b} million Ft`, unsure: "Not sure yet", skip: "I'd rather not say" },
+    de: { unit: "Mio. Ft", under: (s) => `unter ${s} Mio. Ft`, over: (s) => `über ${s} Mio. Ft`, range: (a, b) => `${a}–${b} Mio. Ft`, unsure: "Weiß noch nicht", skip: "Lieber nicht angeben" },
 };
 // Fixed (non-adaptive) budget band thresholds in millions, per scale - used to
 // build localized fallback chips when the running ballpark isn't computable yet.
@@ -1210,7 +1321,7 @@ const BUDGET_FIXED_M = { small: [1, 2, 3], flat: [5, 10, 15], house: [10, 20, 35
 function fixedBudgetChips(scale, lang = "hu") {
     const w = BUDGET_WORDS[normLang(lang)];
     const [a, b, c] = BUDGET_FIXED_M[scale] || BUDGET_FIXED_M.small;
-    return [w.under(a), w.range(a, b), w.range(b, c), w.over(c), w.unsure];
+    return [w.under(a), w.range(a, b), w.range(b, c), w.over(c), w.unsure, w.skip];
 }
 
 // Size label: bathroom band token → friendly band; free number → "N m²";
@@ -1329,10 +1440,13 @@ function translateItemLabel(huLabel, lang) {
 }
 
 // Choice fields with fixed tokens, validated against their allowed set below.
+// NB: `budget` is NOT here. It is stored as the human-readable band label the
+// customer picked (adaptive, so there is no fixed token set); validating it
+// against LABELS would silently delete every real answer.
 const CHOICE_FIELDS = ["projectType", "tier", "washing", "layout", "heating", "scope",
     "roomscope", "bathrooms", "kitchen", "windows", "heatingsys",
     "furniture", "kitchen_fm", "appliances", "walls", "condition", "floortile", "klima",
-    "refine_gate", "budget", "timeline"];
+    "refine_gate", "timeline"];
 
 // Drop any choice-field value the model invents that isn't a known canonical
 // value (validated against LABELS, the single source of allowed tokens). `size`
@@ -1501,7 +1615,7 @@ function renderCustomerQuote(quote, sel, lang = "hu") {
     return [priceBubble, nextBubble, recap.join("\n")].join("\n[[SPLIT]]\n");
 }
 
-const PHONE = process.env.LEAD_PHONE || "+36 30 260 57 56";
+const PHONE = process.env.LEAD_PHONE || "+36 20 254 6624";
 
 // ---------------------------------------------------------------------------
 //  System prompt (Hungarian) - conversation + structured output contract
@@ -1579,14 +1693,17 @@ A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL
 3. tier - kivitelezési szint → basic|mid|premium|nem_tudom
 
 === MINDEN TÍPUSNÁL AZ ALAPKÉRDÉSEK UTÁN ===
-budget - "Nagyjából mekkora keretet szánna rá?" RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben. FONTOS: a felkínált összeg-sávokat a RENDSZER állítja össze az ADDIG MEGADOTT válaszok (méret, munka mélysége, kivitelezési szint, szaniterek stb.) alapján - tehát egy kis alap munkánál kisebb, egy nagy prémiumnál nagyobb keretsávokat mutat. Ezt a mezőt a rendszer kezeli és tölti ki: a DATA blokkban a "budget" MINDIG maradjon üres string (""). Fogadd el a választ és LÉPJ TOVÁBB - SOHA ne tedd fel újra ugyanazt a kérdést.
 timeline - "Mikorra szeretné a kivitelezést?" → t_asap|t_month|t_halfyear|t_thisyear|t_unsure
 
-ELÉRHETŐSÉGEK - a budget és timeline UTÁN. Előttük rövid átvezető (pl. "Köszönöm! Hogy elküldhessük a személyre szabott árajánlatot, kérek még pár adatot."). Utána egyesével (szabad szöveg, NINCS gomb), és mondd meg RÖVIDEN, miért kéred:
+ELÉRHETŐSÉGEK - a timeline UTÁN, EGYESÉVEL, EBBEN A SORRENDBEN (szabad szöveg, NINCS gomb).
+Az átvezető mondat NAGYON fontos: itt hagyják abba a legtöbben, ezért érezze, hogy MÁR CSAK EGY LÉPÉS
+választja el az árától. Pl.: "Köszönöm, megvan minden a számításhoz! Már csak pár adat, és küldöm a
+kalkulációt." Utána MINDEN egyes adatnál mondd meg RÖVIDEN, MIÉRT kéred - indoklással sokkal többen
+válaszolnak. A sorrend szándékos: a legkisebb ellenállású adat az első, a telefonszám a legutolsó.
 name - "Kérem a nevét - kinek címezzük az árajánlatot?"
-email - "Mi az e-mail címe? Erre küldjük el az árajánlatot."
-phone - "Mi a telefonszáma? Ezen a számon hívjuk vissza a részletekkel."
-postal_code - "Mi az irányítószáma? Ez alapján egyeztetjük a felmérést."
+postal_code - "Mi az irányítószáma? Ez alapján tudjuk, hogy be tudjuk-e vállalni a területet, és ez befolyásolja az árat is."
+email - "Mi az e-mail címe? Erre küldjük el írásban a tételes kalkulációt."
+phone - "Mi a telefonszáma? Csak a felmérés időpontjának egyeztetéséhez kérjük."
 
 === PONTOSÍTÓ SZAKASZ - CSAK TELJES LAKÁSNÁL (lakas) ÉS CSALÁDI HÁZNÁL (haz), az elérhetőségek UTÁN ===
 A rendszer ekkor már mutat egy ELŐZETES ÁRSÁVOT az ügyfélnek. A te dolgod először egy KAPUKÉRDÉST feltenni:
@@ -1599,6 +1716,21 @@ refine_gate - **félkövér** fő kérdés: "Megvan az **előzetes ár**! Szeret
   windows - "Kell ablakcsere (nyílászárócsere)?" → csere|marad|nem_tudom
   heatingsys - "Fűtéskorszerűsítés?": • **Marad a mostani** • **Radiátorcsere** • **Padlófűtés** • **Hőszivattyús rendszer** → marad|radiator|padlofutes|hoszivattyu|nem_tudom
   klima - "Kér klímát?" → igen|nem|nem_tudom
+
+=== LEGUTOLSÓ KÉRDÉS - A KERET (budget), MINDEN TÍPUSNÁL ===
+Ez a LEGUTOLSÓ kérdés, MINDEN más után (elérhetőségek és pontosító kérdések után is).
+Szándékosan van a végén: a keretet a beszélgetés elején kérdezni szűrésnek hat és elriasztja az embereket.
+budget - PONTOSAN EZZEL a felütéssel kérdezd, indoklással, magázódva, külön sorban és félkövérrel
+(ahogy minden más fő kérdést is):
+"**Ahhoz, hogy el tudjuk küldeni az árajánlatot, kérem, határozza meg a keret összegét.**"
+NE tedd hozzá, hogy kihagyható, és NE bagatellizáld el a kérdést - az indoklással megfogalmazott,
+határozott kérés sokkal több választ hoz, mint egy bocsánatkérő "ha nem szeretné, ugorjuk át".
+(A gombok között ettől függetlenül ott van egy kilépő lehetőség annak, aki tényleg nem akarja megadni,
+és a rendszer a kihagyást is elfogadja - de te ezt NE ajánlgasd.)
+RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben - a felkínált összeg-sávokat a RENDSZER állítja
+össze az addigi válaszokból. Ezt a mezőt a rendszer kezeli és tölti ki: a DATA blokkban a "budget"
+MINDIG maradjon üres string (""). Fogadd el a választ (a kihagyást is) és LÉPJ TOVÁBB - SOHA ne tedd
+fel újra ugyanazt a kérdést.
 
 MEGJEGYZÉS: A bontást, vízszigetelést, gépészetet, villanyszerelést, festést és a törmelékelszállítást NE kérdezd meg külön - ezek a kulcsrakész ajánlatban benne vannak. Külső (homlokzat, tető, kerítés, térkövezés) munkát NEM vállalunk - ezt NE kérdezd és NE ajánld.
 
@@ -1929,26 +2061,34 @@ export default async function handler(request, response) {
 
         const { state } = request.body || {};
 
+        // --- STATE BEFORE THE MODEL CALL ---------------------------------------
+        // Everything the backend knows, worked out WITHOUT the model: the state
+        // the widget carries, the DATA blocks from earlier turns, and this turn's
+        // answer mapped deterministically onto the field that was being asked.
+        // This is what decides which question comes next - the model is told, it
+        // does not decide. (Doing it here, before the call, is what keeps the
+        // question text and the chips describing the same field.)
+        const priorSel = Array.isArray(history)
+            ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => stripManaged(extractData(m.content)))
+            : [];
+        const baseSel = mergeState(state, ...priorSel);
+        const askedField = pendingField(baseSel);
+
         // --- EARLY CONTACT CHECK: if the customer is answering a contact field,
         // validate it BEFORE spending a model call. On a bad value we keep the
         // field unrecorded so it stays "pending" and re-ask - this is what stops
         // a rejected phone/e-mail bleeding into the NEXT field. ---
         {
-            const priorSel = Array.isArray(history)
-                ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => stripManaged(extractData(m.content)))
-                : [];
-            const baseSel = mergeState(state, ...priorSel);
-            const pend = pendingField(baseSel);
             let reask = null;
             if (typeof question === "string" && question.trim()) {
                 const M = msg(lang);
-                if (pend === "email") {
+                if (askedField === "email") {
                     const i = emailIssue(question);
                     if (i === "gmail") reask = M.reaskEmailTypo;
                     else if (i) reask = M.reaskEmail;
-                } else if (pend === "phone") {
+                } else if (askedField === "phone") {
                     if (phoneIssue(question)) reask = M.reaskPhone;
-                } else if (pend === "postal_code") {
+                } else if (askedField === "postal_code") {
                     if (postalIssue(question)) reask = M.reaskPostal;
                 }
             }
@@ -1964,8 +2104,28 @@ export default async function handler(request, response) {
             }
         }
 
-        // Normalized message list for the model (system prompt in the customer's language).
-        const messages = [{ role: "system", content: systemPromptFor(lang) }];
+        // Record this turn's answer into the field the customer was actually
+        // being asked, then work out what to ask next.
+        const determined = {};
+        if (askedField) {
+            const v = mapAnswer(askedField, question, baseSel);
+            if (v) determined[askedField] = v;
+        }
+        const preSel = mergeState(baseSel, determined);
+        const nextField = pendingField(preSel);
+
+        // --- COMPLETION, decided before the model call ---
+        // Once every field is answered the reply is fully deterministic
+        // (renderCustomerQuote), so calling the model here would spend money on
+        // an answer we throw away - and give it one more chance to say something
+        // that contradicts the quote.
+        if (!nextField && isQuoteReady(preSel)) {
+            return await finishQuote(preSel, history, lang, response);
+        }
+
+        // Normalized message list for the model (system prompt in the customer's
+        // language, plus the one question it is allowed to ask this turn).
+        const messages = [{ role: "system", content: systemPromptFor(lang) + nextQuestionDirective(nextField, lang) }];
         if (Array.isArray(history) && history.length > 0) {
             for (const m of history) {
                 if (m && m.role && typeof m.content === "string") {
@@ -1998,24 +2158,11 @@ export default async function handler(request, response) {
             aiAnswer = aiAnswer.replace(/<!--DATA:.*?-->/s, "").trim();
         }
 
-        // ... then merge it onto the accumulated state carried by the widget.
-        const priorSel = Array.isArray(history)
-            ? history.filter((m) => m && (m.role === "assistant" || m.role === "model")).map((m) => stripManaged(extractData(m.content)))
-            : [];
-        const baseSel = mergeState(state, ...priorSel);
-
-        // Deterministically record the answer the customer just gave into the
-        // field they were being asked - so chips advance immediately.
-        const determined = {};
-        const pending = pendingField(baseSel);
-        if (pending) {
-            const v = mapAnswer(pending, question, baseSel);
-            if (v) determined[pending] = v;
-        }
-
-        // Final state, by ascending trust: model block (least) < accumulated <
-        // this turn's deterministically-mapped answer (wins).
-        const sel = mergeState(currentSel, baseSel, determined);
+        // Final state, by ascending trust: model block (least) < everything the
+        // backend worked out before the call (wins). Any value the model invented
+        // for a field further down the list than the current question is dropped,
+        // so it can never make the chips skip ahead of the question on screen.
+        const sel = dropSkipAhead(mergeState(currentSel, preSel), preSel);
 
         // Progress for the widget's progress bar (project questions only). The
         // field set depends on the chosen project type.
@@ -2024,39 +2171,10 @@ export default async function handler(request, response) {
         const progress = progFields.filter((f) => sel[f] != null && String(sel[f]).trim() !== "").length;
 
         // --- COMPLETION CHECK (backend-decided, model-independent) ---
+        // Normally the check above catches this before the model call; this is the
+        // case where the model's own DATA block completed the last missing field.
         if (isQuoteReady(sel)) {
-            const quote = buildQuote(sel);
-
-            console.log("\n========================================");
-            console.log(`ÚJ ÁRAJÁNLAT / LEAD - ${FLOW_LABEL[sel.projectType] || "Felújítás"}`);
-            console.log(`Ügyfél: ${sel.name} | ${sel.phone} | ${sel.email}`);
-            console.log(`Irsz.: ${sel.postal_code} | Méret: ${sizeLabel(sel.size, sel.projectType)} | Szint: ${sel.tier}`);
-            console.log(`Becsült sáv: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`);
-            console.log("========================================\n");
-
-            // The quote bubbles the customer is about to see are the last turn of
-            // the conversation, so append them - otherwise the owner's transcript
-            // stops one message short and never shows the price that was quoted.
-            const customerAnswer = renderCustomerQuote(quote, sel, lang);
-            await sendQuoteEmail(sel, quote, {
-                to: process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com",
-                toCustomer: false,
-                transcript: [
-                    ...(Array.isArray(history) ? history : []),
-                    { role: "assistant", content: customerAnswer },
-                ],
-            });
-
-            return response.status(200).json({
-                answer: customerAnswer,
-                chips: [],
-                emailOffer: EMAIL_OFFER_ENABLED,
-                lead: { sel, quote },
-                state: sel,
-                estimate: { low: quote.low, high: quote.high, partial: false },
-                progress: progressTotal,
-                progressTotal,
-            });
+            return await finishQuote(sel, history, lang, response);
         }
 
         aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
@@ -2067,6 +2185,47 @@ export default async function handler(request, response) {
         console.error("Function Crash:", error.message);
         return response.status(500).json({ answer: msg(lang).serverErr });
     }
+}
+
+// ---------------------------------------------------------------------------
+//  Deliver the finished quote: log it, e-mail the owner (with the full
+//  transcript), and return the customer-facing bubbles. Shared by both
+//  completion paths so they can never drift apart.
+// ---------------------------------------------------------------------------
+async function finishQuote(sel, history, lang, response) {
+    const quote = buildQuote(sel);
+    const progFields = progressFields(sel);
+
+    console.log("\n========================================");
+    console.log(`ÚJ ÁRAJÁNLAT / LEAD - ${FLOW_LABEL[sel.projectType] || "Felújítás"}`);
+    console.log(`Ügyfél: ${sel.name} | ${sel.phone} | ${sel.email}`);
+    console.log(`Irsz.: ${sel.postal_code} | Méret: ${sizeLabel(sel.size, sel.projectType)} | Szint: ${sel.tier}`);
+    console.log(`Becsült sáv: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`);
+    console.log("========================================\n");
+
+    // The quote bubbles the customer is about to see are the last turn of the
+    // conversation, so append them - otherwise the owner's transcript stops one
+    // message short and never shows the price that was quoted.
+    const customerAnswer = renderCustomerQuote(quote, sel, lang);
+    await sendQuoteEmail(sel, quote, {
+        to: process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com",
+        toCustomer: false,
+        transcript: [
+            ...(Array.isArray(history) ? history : []),
+            { role: "assistant", content: customerAnswer },
+        ],
+    });
+
+    return response.status(200).json({
+        answer: customerAnswer,
+        chips: [],
+        emailOffer: EMAIL_OFFER_ENABLED,
+        lead: { sel, quote },
+        state: sel,
+        estimate: { low: quote.low, high: quote.high, partial: false },
+        progress: progFields.length,
+        progressTotal: progFields.length,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -2096,40 +2255,70 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         return false;
     }
 
+    // Strip CR/LF from any user value used in a header (injection guard).
+    const oneLine = (s) => String(s == null ? "" : s).replace(/[\r\n]+/g, " ").trim();
+
+    // --- OWNER COPY -------------------------------------------------------
+    // Deliberately plain: no banner, no borders, no coloured table. A styled
+    // "template" look is what lands a message in Gmail's Promotions tab, and
+    // this one is a work notification, not a campaign. It ships a real
+    // text/plain part and replies straight to the customer.
+    if (!toCustomer) {
+        const flowHu = FLOW_LABEL[sel.projectType] || "Felújítás";
+        const lines = [];
+        lines.push(`Új árajánlatkérés érkezett a weboldali asszisztensen keresztül.`, "");
+        lines.push("ÜGYFÉL");
+        lines.push(`Név: ${oneLine(sel.name) || "-"}`);
+        lines.push(`Telefon: ${oneLine(sel.phone) || "-"}`);
+        lines.push(`E-mail: ${oneLine(sel.email) || "-"}`);
+        lines.push(`Irányítószám: ${oneLine(sel.postal_code) || "-"}`);
+        lines.push(`Tervezett keret: ${oneLine(sel.budget) || "-"}`);
+        lines.push(`Tervezett kivitelezés: ${lbl("timeline", sel.timeline)}`, "");
+        lines.push(`A MUNKA (${flowHu})`);
+        for (const [k, v] of summaryPairs(sel, "hu")) lines.push(`${k}: ${v}`);
+        lines.push("", "KALKULÁCIÓ (kulcsrakész, nettó)");
+        for (const i of quote.items) lines.push(`${i.label}: kb. ${formatHuf(i.low)} - ${formatHuf(i.high)}`);
+        lines.push(`Becsült végösszeg: kb. ${formatHuf(quote.low)} - ${formatHuf(quote.high)}`);
+        lines.push(`Fajlagos: ~${formatHuf(quote.perM2)}/m² nettó`, "");
+        const tText = transcriptText(opts.transcript);
+        if (tText) lines.push("TELJES BESZÉLGETÉS", "", tText);
+        const textBody = lines.join("\n");
+
+        // Minimal HTML: same content, system font, no colours or boxes.
+        const esc2 = (s) => esc(s);
+        const htmlLines = [];
+        htmlLines.push(`<p>Új árajánlatkérés érkezett a weboldali asszisztensen keresztül.</p>`);
+        htmlLines.push(`<p><b>Ügyfél</b><br>Név: ${esc2(sel.name) || "-"}<br>Telefon: ${esc2(sel.phone) || "-"}<br>E-mail: ${esc2(sel.email) || "-"}<br>Irányítószám: ${esc2(sel.postal_code) || "-"}<br>Tervezett keret: ${esc2(sel.budget) || "-"}<br>Tervezett kivitelezés: ${esc2(lbl("timeline", sel.timeline))}</p>`);
+        htmlLines.push(`<p><b>A munka (${esc2(flowHu)})</b><br>${summaryPairs(sel, "hu").map(([k, v]) => `${esc2(k)}: ${esc2(v)}`).join("<br>")}</p>`);
+        htmlLines.push(`<p><b>Kalkuláció (kulcsrakész, nettó)</b><br>${quote.items.map(i => `${esc2(i.label)}: kb. ${formatHuf(i.low)} - ${formatHuf(i.high)}`).join("<br>")}<br>Becsült végösszeg: kb. ${formatHuf(quote.low)} - ${formatHuf(quote.high)}<br>Fajlagos: ~${formatHuf(quote.perM2)}/m² nettó</p>`);
+        const tHtml = transcriptHtml(opts.transcript);
+        if (tHtml) htmlLines.push(`<p><b>Teljes beszélgetés</b></p>${tHtml}`);
+        const ownerHtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5">${htmlLines.join("")}</div>`;
+
+        // Plain, specific subject. No brackets, no capitals, no price - those are
+        // the markers of bulk mail, and a name plus a place reads like a message
+        // from a person.
+        const subj = `Árajánlatkérés: ${oneLine(sel.name) || "névtelen"} - ${FLOW_LABEL[sel.projectType] || "felújítás"}, ${oneLine(sel.postal_code) || "?"}`;
+        const sentOwner = await resendSend({
+            from: fromEmail, to: toEmail, subject: subj, html: ownerHtml, text: textBody,
+            replyTo: (sel.email && !emailIssue(sel.email)) ? oneLine(sel.email) : undefined,
+        });
+        if (sentOwner.ok) { console.log("Árajánlat e-mail elküldve (tulajdonos):", sentOwner.id); return true; }
+        console.error("Resend hiba:", sentOwner.error);
+        return false;
+    }
+
+    // --- CUSTOMER COPY ----------------------------------------------------
+    // This one IS a sales document, so it keeps the branded layout.
     // NB: all customer-supplied text (name/phone/e-mail/postal/budget) is HTML-
     // escaped via esc() so a malicious value can't inject markup into the inbox.
     const itemRows = quote.items
         .map(i => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${esc(translateItemLabel(i.label, elang))}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${E.approx} ${formatHuf(i.low)} – ${formatHuf(i.high)}</td></tr>`)
         .join("");
 
-    // Full chat transcript - owner copy only, so the recipient can see exactly
-    // what the customer said (not just the extracted fields).
-    const transcriptRows = (!toCustomer && Array.isArray(opts.transcript))
-        ? transcriptHtml(opts.transcript)
-        : "";
-    const transcriptBlock = transcriptRows ? `
-        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
-        <h3 style="margin:0 0 8px">Teljes beszélgetés</h3>
-        <div style="font-size:13px;color:#374151">${transcriptRows}</div>` : "";
-
-    // Client-details block is only included in the owner's copy.
-    const clientBlock = toCustomer ? "" : `
-        <h3 style="margin:0 0 8px">Ügyfél adatai</h3>
-        <p style="margin:4px 0"><b>Név:</b> ${esc(sel.name) || "-"}</p>
-        <p style="margin:4px 0"><b>Telefon:</b> ${esc(sel.phone) || "-"}</p>
-        <p style="margin:4px 0"><b>E-mail:</b> ${esc(sel.email) || "-"}</p>
-        <p style="margin:4px 0"><b>Irányítószám:</b> ${esc(sel.postal_code) || "-"}</p>
-        <p style="margin:4px 0"><b>Tervezett keret:</b> ${esc(sel.budget) || "-"}</p>
-        <p style="margin:4px 0"><b>Tervezett kivitelezés:</b> ${esc(lbl("timeline", sel.timeline))}</p>
-        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`;
-
-    const flow = FLOW_LABEL[sel.projectType] || "Felújítás"; // Hungarian, used in owner subject
-    // Customer heading uses the translated project label; owner heading stays HU.
-    const flowDisp = toCustomer ? lbl("projectType", sel.projectType || "furdo", elang) : flow;
-    const heading = toCustomer ? E.yourQuote(esc(flowDisp)) : `Új árajánlat - NM Bau ${esc(flow)}`;
-    const intro = toCustomer
-        ? `<p style="margin:0 0 12px">${esc(E.intro(sel.name))}</p>`
-        : "";
+    const flowDisp = lbl("projectType", sel.projectType || "furdo", elang);
+    const heading = E.yourQuote(esc(flowDisp));
+    const intro = `<p style="margin:0 0 12px">${esc(E.intro(sel.name))}</p>`;
 
     // Project summary rows, tailored to the project type (shared with the chat recap).
     const summaryRows = summaryPairs(sel, elang)
@@ -2142,7 +2331,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <h2 style="margin:0">${heading}</h2>
       </div>
       <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
-        ${intro}${clientBlock}
+        ${intro}
         <h3 style="margin:0 0 8px">${esc(E.summaryH)}</h3>
         ${summaryRows}
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
@@ -2150,21 +2339,14 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
           <tr><td style="padding:10px 12px;font-weight:bold">${esc(E.totalRow)}</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${E.approx} ${formatHuf(quote.low)} – ${formatHuf(quote.high)}</td></tr>
         </table>
-        ${toCustomer ? "" : `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af">Fajlagos: ~${formatHuf(quote.perM2)}/m² nettó (kisebb terület esetén magasabb a fix költségek miatt)</p>`}
-        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">${esc(E.footnote)}${toCustomer ? " " + PHONE : ""}</p>
-        ${transcriptBlock}
+        <p style="margin:16px 0 0;font-size:12px;color:#6b7280">${esc(E.footnote)} ${PHONE}</p>
       </div>
     </div>`;
 
-    // Strip CR/LF from any user value used in the subject (header-injection guard).
-    const oneLine = (s) => String(s == null ? "" : s).replace(/[\r\n]+/g, " ").trim();
-    const subject = toCustomer
-        ? E.subject(formatHuf(quote.low), formatHuf(quote.high))
-        : `[ÚJ ÁRAJÁNLAT] ${flow} - ${oneLine(sel.postal_code)} - ${oneLine(sel.name)} - ${formatHuf(quote.low)}–${formatHuf(quote.high)}`;
-
+    const subject = E.subject(formatHuf(quote.low), formatHuf(quote.high));
     const sent = await resendSend({ from: fromEmail, to: toEmail, subject, html });
     if (sent.ok) {
-        console.log(`Árajánlat e-mail elküldve (${toCustomer ? "ügyfél" : "tulajdonos"}):`, sent.id);
+        console.log("Árajánlat e-mail elküldve (ügyfél):", sent.id);
         return true;
     }
     console.error("Resend hiba:", sent.error);
@@ -2176,16 +2358,23 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
 //  callers (and the /api/faq-agent?selftest=1 diagnostic) can report the REAL
 //  reason a mail failed - unverified domain, bad key, wrong sender, etc.
 // ---------------------------------------------------------------------------
-async function resendSend({ from, to, subject, html }) {
+async function resendSend({ from, to, subject, html, text, replyTo }) {
     const key = (process.env.RESEND_API_KEY || "").trim();
     if (!key) return { ok: false, error: "RESEND_API_KEY nincs beállítva a környezetben." };
     if (/[^\x20-\x7E]/.test(key)) return { ok: false, error: "A RESEND_API_KEY nem ASCII karaktereket tartalmaz (valószínűleg a kimaszkolt pontokat másoltad be)." };
     if (!to) return { ok: false, error: "Nincs címzett (LEAD_EMAIL_TO)." };
+    // A real plain-text part is one of the strongest signals that a message is
+    // correspondence rather than a campaign - Gmail's Promotions classifier
+    // leans heavily on "HTML-only, heavily styled" mail. `reply_to` pointing at
+    // a human does the same, and it means hitting Reply answers the customer.
+    const payload = { from, to: [to], subject, html };
+    if (text) payload.text = text;
+    if (replyTo) payload.reply_to = replyTo;
     try {
         const res = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
-            body: JSON.stringify({ from, to: [to], subject, html }),
+            body: JSON.stringify(payload),
         });
         const result = await res.json().catch(() => ({}));
         if (res.ok) return { ok: true, id: result.id };
@@ -2242,30 +2431,45 @@ async function sendTranscriptEmail(sel, transcript, meta = {}) {
         ${meta.pageUrl ? `<p style="margin:4px 0;font-size:12px;color:#6b7280">Oldal: ${esc(oneLine(meta.pageUrl))}</p>` : ""}
         ${meta.reason ? `<p style="margin:4px 0;font-size:12px;color:#6b7280">Kiváltó esemény: ${esc(oneLine(meta.reason))}</p>` : ""}`;
 
-    const title = meta.test ? "TESZT - beszélgetés másolat" : "Befejezetlen beszélgetés";
-    const html = `
-    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#111827">
-      <div style="background:#1C1917;color:#ffffff;padding:20px 24px;border-radius:12px 12px 0 0;border-bottom:3px solid #B8860B">
-        <h2 style="margin:0">${esc(title)} - NM Bau</h2>
-      </div>
-      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
-        <p style="margin:0 0 12px;color:#6b7280">${meta.test
-            ? "Ez egy teszt e-mail, amit te magad indítottál. Ha ez megérkezett, az e-mail küldés működik."
-            : "Ez a beszélgetés nem jutott el a kész árajánlatig, de az érdeklődő elmondta, amit lent olvasol."}</p>
-        <h3 style="margin:0 0 8px">Amit eddig tudunk (${esc(flow)})</h3>
+    const lead = meta.test
+        ? "Ez egy teszt e-mail, amit te magad indítottál. Ha ez megérkezett, az e-mail küldés működik."
+        : "Ez a beszélgetés nem jutott el a kész árajánlatig, de az érdeklődő elmondta, amit lent olvasol.";
+
+    // Plain, correspondence-shaped - see the note in sendQuoteEmail: a branded
+    // template is what Gmail files under Promotions.
+    const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5">
+        <p>${esc(lead)}</p>
+        <p><b>Amit eddig tudunk (${esc(flow)})</b></p>
         ${knownBlock}${estBlock}
         ${metaBlock}
-        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
-        <h3 style="margin:0 0 8px">Teljes beszélgetés</h3>
-        <div style="font-size:13px;color:#374151">${rows}</div>
-      </div>
-    </div>`;
+        <p><b>Teljes beszélgetés</b></p>
+        ${rows}
+      </div>`;
 
-    const who = s.name ? ` - ${oneLine(s.name)}` : "";
-    const tag = meta.test ? "[TESZT]" : "[BESZÉLGETÉS]";
-    const subject = `${tag} ${flow}${who} - ${turns - 1 > 0 ? turns - 1 : 0} válasz${meta.update ? " (frissítés)" : ""}`;
+    // NB: null = "leave this line out"; "" is a deliberate blank line, so the
+    // filter must only drop nulls.
+    const textBody = [
+        lead, "",
+        `AMIT EDDIG TUDUNK (${flow})`,
+        ...(pairs.length ? pairs.map(([k, v]) => `${k}: ${v}`) : ["Még semmit nem adott meg."]),
+        est ? `Futó becslés: kb. ${formatHuf(est.low)} - ${formatHuf(est.high)}${est.partial ? " (részleges)" : ""}` : null,
+        "",
+        `Időpont: ${when} | Nyelv: ${normLang(meta.lang)} | Ügyfél válaszai: ${turns - 1 > 0 ? turns - 1 : 0}`,
+        meta.pageUrl ? `Oldal: ${oneLine(meta.pageUrl)}` : null,
+        "",
+        "TELJES BESZÉLGETÉS", "",
+        transcriptText(transcript),
+    ].filter((l) => l !== null).join("\n");
 
-    const sent = await resendSend({ from: fromEmail, to: toEmail, subject, html });
+    const who = s.name ? `${oneLine(s.name)}` : "névtelen érdeklődő";
+    const subject = meta.test
+        ? "Teszt: a chatbot e-mail küldése működik"
+        : `Félbehagyott beszélgetés: ${who} - ${flow}${meta.update ? " (frissítés)" : ""}`;
+
+    const sent = await resendSend({
+        from: fromEmail, to: toEmail, subject, html, text: textBody,
+        replyTo: (s.email && !emailIssue(s.email)) ? oneLine(s.email) : undefined,
+    });
     if (sent.ok) console.log(`Beszélgetés-másolat elküldve a tulajdonosnak:`, sent.id);
     else console.error("Beszélgetés-másolat hiba:", sent.error);
     return sent;

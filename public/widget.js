@@ -3,7 +3,7 @@
   const config = window.NMBAU_CONFIG || window.KAZAN_CONFIG || {};
   const apiUrl = config.apiUrl || "/api/faq-agent";
   const assetsUrl = config.assetsUrl || ""; // e.g. "https://your-app.vercel.app"
-  const PHONE = "+36 30 260 57 56";
+  const PHONE = "+36 20 254 6624";
   const BRAND = "NM Bau";
 
   // --- Language sync with the host site -----------------------------------
