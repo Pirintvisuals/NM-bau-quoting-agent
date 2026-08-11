@@ -177,6 +177,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`\n🚀 Server running at http://localhost:${PORT}/`);
-    console.log(`📱 Chatbot demo ready for your client!\n`);
+    console.log(`\nServer running at http://localhost:${PORT}/`);
+    console.log(`Chatbot demo ready for your client!\n`);
 });

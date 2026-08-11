@@ -2028,7 +2028,7 @@ export default async function handler(request, response) {
             const quote = buildQuote(sel);
 
             console.log("\n========================================");
-            console.log(`🎯 ÚJ ÁRAJÁNLAT / LEAD - ${FLOW_LABEL[sel.projectType] || "Felújítás"}`);
+            console.log(`ÚJ ÁRAJÁNLAT / LEAD - ${FLOW_LABEL[sel.projectType] || "Felújítás"}`);
             console.log(`Ügyfél: ${sel.name} | ${sel.phone} | ${sel.email}`);
             console.log(`Irsz.: ${sel.postal_code} | Méret: ${sizeLabel(sel.size, sel.projectType)} | Szint: ${sel.tier}`);
             console.log(`Becsült sáv: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`);
@@ -2088,11 +2088,11 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
     const E = EMAIL_STR[elang] || EMAIL_STR.hu;
 
     if (!resendKey) {
-        console.log("⚠️  Nincs RESEND_API_KEY - az e-mail kimarad. A lead a fenti logban szerepel.");
+        console.log("Nincs RESEND_API_KEY - az e-mail kimarad. A lead a fenti logban szerepel.");
         return false;
     }
     if (!toEmail) {
-        console.log("⚠️  Nincs címzett e-mail cím - kihagyva.");
+        console.log("Nincs címzett e-mail cím - kihagyva.");
         return false;
     }
 
@@ -2164,10 +2164,10 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
 
     const sent = await resendSend({ from: fromEmail, to: toEmail, subject, html });
     if (sent.ok) {
-        console.log(`✅ Árajánlat e-mail elküldve (${toCustomer ? "ügyfél" : "tulajdonos"}):`, sent.id);
+        console.log(`Árajánlat e-mail elküldve (${toCustomer ? "ügyfél" : "tulajdonos"}):`, sent.id);
         return true;
     }
-    console.error("❌ Resend hiba:", sent.error);
+    console.error("Resend hiba:", sent.error);
     return false;
 }
 
@@ -2266,7 +2266,7 @@ async function sendTranscriptEmail(sel, transcript, meta = {}) {
     const subject = `${tag} ${flow}${who} - ${turns - 1 > 0 ? turns - 1 : 0} válasz${meta.update ? " (frissítés)" : ""}`;
 
     const sent = await resendSend({ from: fromEmail, to: toEmail, subject, html });
-    if (sent.ok) console.log(`✅ Beszélgetés-másolat elküldve a tulajdonosnak:`, sent.id);
-    else console.error("❌ Beszélgetés-másolat hiba:", sent.error);
+    if (sent.ok) console.log(`Beszélgetés-másolat elküldve a tulajdonosnak:`, sent.id);
+    else console.error("Beszélgetés-másolat hiba:", sent.error);
     return sent;
 }
