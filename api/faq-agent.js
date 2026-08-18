@@ -481,9 +481,18 @@ function finalize(items, A) {
 // lowest - so the same flat shouldn't quote identically in Zugló and in a village.
 // Applied to the WHOLE quote, the net effect on the total stays a modest ±~8%.
 // Verified spread: Budapest ~70–75k Ft/m² labour vs kisvárosok ~55–65k (qjob/Daibau).
+// Austrian postcodes are ALSO 4 digits (1010 Wien, 8010 Graz), so a raw digit
+// match would silently price a Vienna job as Budapest. If the answer carries any
+// Austria signal we skip the Hungarian index and stay on the baseline.
+const AT_LOCATION = /(ausztria|austria|österreich|oesterreich|osztrák|\bAT\b|\bA-\s?\d{4}\b|wien|vienna|bécs|graz|linz|salzburg|innsbruck|klagenfurt|villach|\bwels\b|sankt pölten|st\.? pölten|dornbirn|wiener neustadt|steyr|feldkirch|bregenz|eisenstadt|leoben|krems|amstetten|kufstein|schwechat|neusiedl|oberwart|güssing|jennersdorf|mattersburg|hallein|braunau|traun|mödling|tulln|hollabrunn|burgenland|steiermark|tirol|vorarlberg|kärnten|niederösterreich|oberösterreich)/i;
+
 function regionMultiplier(postal) {
-    const d = String(postal || "").replace(/\D/g, "");
-    if (!/^\d{4}$/.test(d)) return 1.0; // unknown → national baseline
+    const raw = String(postal || "");
+    if (AT_LOCATION.test(raw)) return 1.0; // Austrian job → no Hungarian region index
+    const d = raw.replace(/\D/g, "");
+    // Now that a town name is a valid answer, catch the one that actually moves
+    // the price when it arrives without a postcode.
+    if (!/^\d{4}$/.test(d)) return /(budapest|\bbp\b)/i.test(raw) ? 1.08 : 1.0;
     const f = d[0];
     if (f === "1") return 1.08;               // Budapest
     if (f === "2" || f === "8" || f === "9") return 1.03; // Pest agglomeráció + nyugat-Dunántúl + Balaton
@@ -974,11 +983,22 @@ function phoneIssue(phone) {
     return d.length >= 9 && d.length <= 13 ? null : "format";
 }
 
-// Postal-code sanity check. Hungarian irányítószám is EXACTLY 4 digits. This also
-// stops a phone number bleeding into the postal field. Returns "format" | null.
-function postalIssue(pc) {
-    const d = String(pc || "").replace(/[^\d]/g, "");
-    return /^\d{4}$/.test(d) ? null : "format";
+// Location sanity check. NM Bau works in Hungary AND in Austria, so this field
+// accepts ANY kind of location: a HU/AT postcode, a settlement name, a district,
+// "Wien 1010", "A-8010 Graz", "Sopron környéke" - all fine. We only reject the
+// two things that are clearly not a location: an empty/one-character answer, and
+// a long digit run (a phone number bleeding into the field).
+// Returns "format" | null.
+function locationIssue(loc) {
+    const s = String(loc || "").trim();
+    if (s.length < 2 || s.length > 80) return "format";
+    const digits = s.replace(/\D/g, "");
+    const letters = s.replace(/[^\p{L}]/gu, "");
+    // Digits only → must look like a postcode (HU/AT 4, DE 5, PL 5, UK-ish 6).
+    if (!letters) return /^\d{3,6}$/.test(digits) ? null : "format";
+    // Has letters but is dominated by digits → almost certainly a phone number.
+    if (digits.length > 6 && letters.length < 2) return "format";
+    return null;
 }
 
 // Given the field the customer is answering + their message + the current state,
@@ -1067,7 +1087,7 @@ const FIELD_TOPIC = {
     refine_gate: "szeretné-e pontosítani az árat néhány gyors kérdéssel",
     timeline: "mikorra szeretné a kivitelezést",
     name: "az ügyfél neve",
-    postal_code: "az ingatlan irányítószáma",
+    postal_code: "hol van az ingatlan - irányítószám VAGY település neve, magyar és osztrák helyszín egyaránt jó",
     email: "az ügyfél e-mail címe",
     phone: "az ügyfél telefonszáma",
     budget: "a tervezett keretösszeg - PONTOSAN ezzel a felütéssel kérdezd: \"Ahhoz, hogy el tudjuk küldeni az árajánlatot, kérem, határozza meg a keret összegét.\" Ne ajánlgasd, hogy kihagyható",
@@ -1621,7 +1641,7 @@ const PHONE = process.env.LEAD_PHONE || "+36 20 254 6624";
 //  System prompt (Hungarian) - conversation + structured output contract
 // ---------------------------------------------------------------------------
 const SYSTEM_PROMPT = `SZEMÉLYISÉG
-Te az "NM Bau" digitális árajánló asszisztense vagy. Lakás- és házfelújítással foglalkozó kivitelező nevében beszélsz: fürdőszoba, konyha, teljes lakás, családi ház és egyes szobák felújítása. FONTOS: kizárólag BELSŐ munkát vállalunk - külső munkát (homlokzat, tető, kerítés, térkövezés) NEM. Kizárólag MAGYARUL válaszolj.
+Te az "NM Bau" digitális árajánló asszisztense vagy. Lakás- és házfelújítással foglalkozó kivitelező nevében beszélsz: fürdőszoba, konyha, teljes lakás, családi ház és egyes szobák felújítása. FONTOS: kizárólag BELSŐ munkát vállalunk - külső munkát (homlokzat, tető, kerítés, térkövezés) NEM. MAGYARORSZÁGON ÉS AUSZTRIÁBAN egyaránt vállalunk munkát, ezért bármilyen magyar vagy osztrák helyszín (irányítószám, város, régió) rendben van - soha ne utasíts vissza egy helyszínt és ne állítsd, hogy csak Magyarországon dolgozunk. Kizárólag MAGYARUL válaszolj.
 
 HANGNEM
 - Udvarias, közvetlen, szakértő és tömör. Lehetőleg 40 szó alatt válaszolj.
@@ -1701,7 +1721,7 @@ választja el az árától. Pl.: "Köszönöm, megvan minden a számításhoz! M
 kalkulációt." Utána MINDEN egyes adatnál mondd meg RÖVIDEN, MIÉRT kéred - indoklással sokkal többen
 válaszolnak. A sorrend szándékos: a legkisebb ellenállású adat az első, a telefonszám a legutolsó.
 name - "Kérem a nevét - kinek címezzük az árajánlatot?"
-postal_code - "Mi az irányítószáma? Ez alapján tudjuk, hogy be tudjuk-e vállalni a területet, és ez befolyásolja az árat is."
+postal_code - "Hol van az ingatlan? Elég az irányítószám vagy a település neve. Ez alapján tudjuk, hogy be tudjuk-e vállalni a területet." FONTOS: Magyarországon ÉS Ausztriában is dolgozunk, ezért BÁRMILYEN helymegjelölést fogadj el (magyar vagy osztrák irányítószám, városnév, kerület, régió, pl. "1010 Wien", "Graz", "Sopron", "Burgenland"). SOHA ne mondd, hogy csak magyar irányítószámot fogadsz el, és ne kérd újra, ha a válasz értelmes helymegjelölés.
 email - "Mi az e-mail címe? Erre küldjük el írásban a tételes kalkulációt."
 phone - "Mi a telefonszáma? Csak a felmérés időpontjának egyeztetéséhez kérjük."
 
@@ -1771,7 +1791,7 @@ const MSG = {
         reaskEmailTypo: "Hoppá, úgy tűnik **elírás** csúszott a címbe - a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét.",
         reaskEmail: "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).",
         reaskPhone: "Ezt a **telefonszámot** nem sikerült értelmezni. Kérem, adja meg a teljes számát (pl. **+36 20 123 4567** vagy **06 30 123 4567**).",
-        reaskPostal: "Az **irányítószám** 4 számjegyű (pl. **3525**). Kérem, így adja meg.",
+        reaskPostal: "Ezt a **helyszínt** nem sikerült értelmezni. Kérem, adja meg az **irányítószámot vagy a település nevét** (pl. **3525**, **Sopron**, **1010 Wien**).",
         rateChat: "Túl sok üzenet rövid idő alatt. Kérjük, várjon egy kicsit, és próbálja újra.",
         rateEmail: "Túl sok kérés. Kérjük, próbálja meg kicsit később.",
         aiDown: "Elnézést, most nem érem el az asszisztenst. Kérlek próbáld újra.",
@@ -1785,7 +1805,7 @@ const MSG = {
         reaskEmailTypo: "Oops, looks like a **typo** slipped into the address - the correct Gmail ending is **gmail.com**. Please type your full e-mail address again.",
         reaskEmail: "I couldn't read that **e-mail address**. Please type the full address (e.g. **name@gmail.com**).",
         reaskPhone: "I couldn't read that **phone number**. Please give the full number (e.g. **+36 20 123 4567**).",
-        reaskPostal: "The **postcode** is 4 digits (e.g. **3525**). Please enter it that way.",
+        reaskPostal: "I couldn't read that **location**. Please give the **postcode or the town name** (e.g. **3525**, **Sopron**, **1010 Wien**).",
         rateChat: "Too many messages in a short time. Please wait a moment and try again.",
         rateEmail: "Too many requests. Please try again a little later.",
         aiDown: "Sorry, I can't reach the assistant right now. Please try again.",
@@ -1799,7 +1819,7 @@ const MSG = {
         reaskEmailTypo: "Hoppla, da hat sich wohl ein **Tippfehler** in die Adresse geschlichen - die richtige Gmail-Endung ist **gmail.com**. Bitte geben Sie Ihre vollständige E-Mail-Adresse erneut ein.",
         reaskEmail: "Diese **E-Mail-Adresse** konnte ich nicht lesen. Bitte geben Sie die vollständige Adresse ein (z. B. **name@gmail.com**).",
         reaskPhone: "Diese **Telefonnummer** konnte ich nicht lesen. Bitte geben Sie die vollständige Nummer an (z. B. **+36 20 123 4567**).",
-        reaskPostal: "Die **Postleitzahl** hat 4 Ziffern (z. B. **3525**). Bitte so eingeben.",
+        reaskPostal: "Diesen **Ort** konnte ich nicht lesen. Bitte geben Sie die **Postleitzahl oder den Ortsnamen** an (z. B. **3525**, **Sopron**, **1010 Wien**).",
         rateChat: "Zu viele Nachrichten in kurzer Zeit. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
         rateEmail: "Zu viele Anfragen. Bitte versuchen Sie es etwas später erneut.",
         aiDown: "Entschuldigung, ich erreiche den Assistenten gerade nicht. Bitte versuchen Sie es erneut.",
@@ -2089,7 +2109,7 @@ export default async function handler(request, response) {
                 } else if (askedField === "phone") {
                     if (phoneIssue(question)) reask = M.reaskPhone;
                 } else if (askedField === "postal_code") {
-                    if (postalIssue(question)) reask = M.reaskPostal;
+                    if (locationIssue(question)) reask = M.reaskPostal;
                 }
             }
             if (reask) {
@@ -2199,7 +2219,7 @@ async function finishQuote(sel, history, lang, response) {
     console.log("\n========================================");
     console.log(`ÚJ ÁRAJÁNLAT / LEAD - ${FLOW_LABEL[sel.projectType] || "Felújítás"}`);
     console.log(`Ügyfél: ${sel.name} | ${sel.phone} | ${sel.email}`);
-    console.log(`Irsz.: ${sel.postal_code} | Méret: ${sizeLabel(sel.size, sel.projectType)} | Szint: ${sel.tier}`);
+    console.log(`Helyszín: ${sel.postal_code} | Méret: ${sizeLabel(sel.size, sel.projectType)} | Szint: ${sel.tier}`);
     console.log(`Becsült sáv: ${formatHuf(quote.low)} – ${formatHuf(quote.high)}`);
     console.log("========================================\n");
 
@@ -2271,7 +2291,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         lines.push(`Név: ${oneLine(sel.name) || "-"}`);
         lines.push(`Telefon: ${oneLine(sel.phone) || "-"}`);
         lines.push(`E-mail: ${oneLine(sel.email) || "-"}`);
-        lines.push(`Irányítószám: ${oneLine(sel.postal_code) || "-"}`);
+        lines.push(`Helyszín: ${oneLine(sel.postal_code) || "-"}`);
         lines.push(`Tervezett keret: ${oneLine(sel.budget) || "-"}`);
         lines.push(`Tervezett kivitelezés: ${lbl("timeline", sel.timeline)}`, "");
         lines.push(`A MUNKA (${flowHu})`);
@@ -2288,7 +2308,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         const esc2 = (s) => esc(s);
         const htmlLines = [];
         htmlLines.push(`<p>Új árajánlatkérés érkezett a weboldali asszisztensen keresztül.</p>`);
-        htmlLines.push(`<p><b>Ügyfél</b><br>Név: ${esc2(sel.name) || "-"}<br>Telefon: ${esc2(sel.phone) || "-"}<br>E-mail: ${esc2(sel.email) || "-"}<br>Irányítószám: ${esc2(sel.postal_code) || "-"}<br>Tervezett keret: ${esc2(sel.budget) || "-"}<br>Tervezett kivitelezés: ${esc2(lbl("timeline", sel.timeline))}</p>`);
+        htmlLines.push(`<p><b>Ügyfél</b><br>Név: ${esc2(sel.name) || "-"}<br>Telefon: ${esc2(sel.phone) || "-"}<br>E-mail: ${esc2(sel.email) || "-"}<br>Helyszín: ${esc2(sel.postal_code) || "-"}<br>Tervezett keret: ${esc2(sel.budget) || "-"}<br>Tervezett kivitelezés: ${esc2(lbl("timeline", sel.timeline))}</p>`);
         htmlLines.push(`<p><b>A munka (${esc2(flowHu)})</b><br>${summaryPairs(sel, "hu").map(([k, v]) => `${esc2(k)}: ${esc2(v)}`).join("<br>")}</p>`);
         htmlLines.push(`<p><b>Kalkuláció (kulcsrakész, nettó)</b><br>${quote.items.map(i => `${esc2(i.label)}: kb. ${formatHuf(i.low)} - ${formatHuf(i.high)}`).join("<br>")}<br>Becsült végösszeg: kb. ${formatHuf(quote.low)} - ${formatHuf(quote.high)}<br>Fajlagos: ~${formatHuf(quote.perM2)}/m² nettó</p>`);
         const tHtml = transcriptHtml(opts.transcript);
@@ -2404,7 +2424,7 @@ async function sendTranscriptEmail(sel, transcript, meta = {}) {
     if (s.name) pairs.push(["Név", s.name]);
     if (s.phone) pairs.push(["Telefon", s.phone]);
     if (s.email) pairs.push(["E-mail", s.email]);
-    if (s.postal_code) pairs.push(["Irányítószám", s.postal_code]);
+    if (s.postal_code) pairs.push(["Helyszín", s.postal_code]);
     if (s.budget) pairs.push(["Tervezett keret", s.budget]);
     if (s.timeline) pairs.push(["Tervezett kivitelezés", lbl("timeline", s.timeline)]);
     if (s.projectType) {
