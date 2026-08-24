@@ -650,7 +650,7 @@ function buildQuote(sel) {
 }
 
 // Exported for unit testing the pricing math (no effect in production).
-export { detectMessageLang, conversationLang, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget };
+export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget };
 
 // ---------------------------------------------------------------------------
 //  FLOW CONFIG - every project type asks its OWN question set. The backend drives

@@ -4,7 +4,7 @@
 // The rule being tested: the customer's OWN writing decides the language, and a
 // wrong guess is worse than no guess. detectMessageLang returns null whenever it
 // is not sure, and null means "keep the language we already had".
-import { detectMessageLang, conversationLang } from './api/faq-agent.js';
+import { detectMessageLang, conversationLang, renderCustomerQuote, buildQuote } from './api/faq-agent.js';
 
 let failed = 0;
 const check = (label, got, want) => {
@@ -90,6 +90,24 @@ check('current message not yet in history is still counted',
 
 check('garbage input falls back safely',
     conversationLang(null, undefined, 'en'), 'en');
+
+console.log('\n■ The finished quote must be written in the customer language');
+{
+    const sel = { projectType: 'furdo', size: '6', tier: 'mid', washing: 'zuhany', layout: 'marad', name: 'Test', postal_code: '1010 Wien' };
+    const quote = buildQuote(sel);
+    // Hungarian words that must NOT appear in an EN/DE quote. 'Ft' is deliberate -
+    // prices stay in Forint in every language.
+    const huLeak = /(felújítás|árajánlat|becsült|kulcsrakész|nettó|helyszíni|fürdőszoba)/i;
+    const hu = renderCustomerQuote(quote, sel, 'hu');
+    const en = renderCustomerQuote(quote, sel, 'en');
+    const de = renderCustomerQuote(quote, sel, 'de');
+    check('HU quote is Hungarian', huLeak.test(hu), true);
+    check('EN quote has no Hungarian left in it', huLeak.test(en), false);
+    check('DE quote has no Hungarian left in it', huLeak.test(de), false);
+    check('EN quote still prices in Ft', /Ft/.test(en), true);
+    check('DE quote still prices in Ft', /Ft/.test(de), true);
+    check('the three renderings actually differ', hu !== en && en !== de, true);
+}
 
 console.log(failed ? `\n✗ ${failed} case(s) failed\n` : '\n✓ minden nyelvfelismerési eset rendben\n');
 process.exit(failed ? 1 : 0);
