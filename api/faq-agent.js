@@ -650,7 +650,7 @@ function buildQuote(sel) {
 }
 
 // Exported for unit testing the pricing math (no effect in production).
-export { buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget };
+export { detectMessageLang, conversationLang, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget };
 
 // ---------------------------------------------------------------------------
 //  FLOW CONFIG - every project type asks its OWN question set. The backend drives
@@ -1344,6 +1344,132 @@ function fixedBudgetChips(scale, lang = "hu") {
     return [w.under(a), w.range(a, b), w.range(b, c), w.over(c), w.unsure, w.skip];
 }
 
+// ===========================================================================
+//  WHICH LANGUAGE IS THE CUSTOMER WRITING IN?
+//  The host site tells us its own language (hu|en|de), but a visitor may well
+//  read the Hungarian page and type in German. Whatever they write in, we answer
+//  in - so the language is decided by the CONVERSATION, with the site language
+//  only as the starting point.
+//
+//  Two independent signals, deliberately kept conservative. Guessing wrong is
+//  much worse than not guessing: an unnecessary switch answers a Hungarian
+//  customer in German. So both signals return null unless they are sure, and a
+//  null simply keeps the language we already had.
+// ===========================================================================
+
+// SIGNAL 1 - a clicked chip. Chip labels are strings WE generated in a known
+// language, so this is exact rather than a guess. Built from the same arrays
+// that render the chips, so it can never drift from them. A label that exists in
+// more than one language (the "6–10 m²" size bands are identical in all three)
+// maps to null = no signal.
+const CHIP_LANG = (() => {
+    const seen = new Map();
+    const put = (label, lang) => {
+        const k = String(label || "").toLowerCase().trim();
+        if (!k) return;
+        if (!seen.has(k)) seen.set(k, lang);
+        else if (seen.get(k) !== lang) seen.set(k, null); // same label in 2 languages
+    };
+    for (const field of Object.keys(CHOICE_VALUES)) {
+        Object.keys(CHOICE_VALUES[field]).forEach((l) => put(l, "hu"));
+        for (const L of ["en", "de"]) {
+            const arr = CHIP_LABELS_I18N[L] && CHIP_LABELS_I18N[L][field];
+            if (arr) arr.forEach((l) => put(l, L));
+        }
+    }
+    for (const pt of Object.keys(SIZE_VALUES)) {
+        Object.keys(SIZE_VALUES[pt]).forEach((l) => put(l, "hu"));
+        for (const L of ["en", "de"]) {
+            const arr = SIZE_CHIPS_I18N[L] && SIZE_CHIPS_I18N[L][pt];
+            if (arr) arr.forEach((l) => put(l, L));
+        }
+    }
+    for (const L of LANGS) { put(BUDGET_WORDS[L].unsure, L); put(BUDGET_WORDS[L].skip, L); }
+    return seen;
+})();
+
+// SIGNAL 2 - typed prose. Function words only (articles, pronouns, verbs,
+// question words): they are what people actually type, and unlike nouns they do
+// NOT appear in names, town names or e-mail addresses. That property is what
+// keeps "Hans Müller", "Wien" and "nev@gmail.com" from switching the language.
+// A word listed under two languages is dropped as ambiguous.
+const LANG_WORDS = {
+    hu: ["nem", "igen", "kérem", "kérek", "köszönöm", "köszi", "szeretnék", "szeretném", "lenne", "van", "hogy", "mit", "mennyi", "mennyibe", "kerül", "kerülne", "meg", "egy", "és", "vagy", "ez", "az", "jó", "kell", "tudom", "tudna", "lehet", "milyen", "hol", "mikor", "miért", "csak", "még", "már", "nagyon", "sok", "kicsit", "akkor", "azt", "ha", "de", "is", "majd", "kellene", "szia", "sziasztok", "üdvözlöm", "rendben", "persze", "inkább", "nálunk", "nekem", "vagyok", "vagyunk", "kaphatok", "árajánlatot", "felújítás", "felújítást", "felújítani"],
+    de: ["ich", "ist", "das", "der", "die", "und", "nicht", "nein", "wie", "eine", "einen", "möchte", "gerne", "danke", "bitte", "für", "mit", "haben", "hätte", "kann", "können", "wir", "sie", "sind", "wäre", "wieviel", "wieviele", "kostet", "kosten", "hallo", "guten", "aber", "auch", "noch", "schon", "sehr", "mein", "meine", "unser", "unsere", "brauche", "brauchen", "machen", "lassen", "würde", "müssen", "soll", "vielen", "dank", "sagen", "fragen", "angebot", "renovierung", "kostenvoranschlag"],
+    en: ["the", "is", "are", "you", "your", "how", "much", "what", "would", "like", "please", "thanks", "thank", "want", "need", "can", "could", "we", "our", "my", "me", "and", "for", "with", "have", "hello", "hi", "there", "just", "some", "about", "does", "do", "don", "it", "that", "this", "quote", "estimate", "renovation", "refurbishment", "cost", "costs", "price", "looking", "wondering"],
+};
+// word -> language, with anything claimed by two languages neutralised. ("is"
+// is both English and German; "sie"/"sind" vs nothing in HU, and so on.)
+const LANG_WORD_INDEX = (() => {
+    const idx = new Map();
+    for (const L of LANGS) for (const w of LANG_WORDS[L]) {
+        if (!idx.has(w)) idx.set(w, L);
+        else if (idx.get(w) !== L) idx.set(w, null);
+    }
+    return idx;
+})();
+
+// Things that are never a language signal, whichever field they were typed into:
+// an e-mail address, a phone number, a bare postcode/size. Checked explicitly so
+// the answer behaves the same when it is re-scanned from the history later, when
+// we no longer know which question it answered.
+const NOT_PROSE = /^[^\s@]+@[^\s@]+$/;
+
+// Returns "hu" | "en" | "de" when the text is CONFIDENTLY in that language,
+// otherwise null (keep whatever language we were already using).
+function detectMessageLang(text) {
+    const raw = String(text || "").trim();
+    if (!raw || raw.length > 2000) return null;
+
+    // Exact chip label → certain answer, no scoring needed.
+    const chip = CHIP_LANG.get(raw.toLowerCase());
+    if (chip) return chip;
+
+    if (NOT_PROSE.test(raw)) return null;
+    const s = raw.toLowerCase();
+    // Too few letters to judge: "6", "3–4 m²", "+36 20 123 4567", "ok".
+    if (s.replace(/[^\p{L}]/gu, "").length < 3) return null;
+
+    const score = { hu: 0, en: 0, de: 0 };
+    for (const tok of s.split(/[^\p{L}]+/u)) {
+        if (!tok) continue;
+        const L = LANG_WORD_INDEX.get(tok);
+        if (L) score[L] += 1;
+    }
+    // Letters only one of the three uses. Hungarian ő/ű and German ß/ä are
+    // decisive; ö/ü are shared by HU and DE, so they score nothing.
+    if (/[őű]/.test(s)) score.hu += 2;
+    if (/[áéíóú]/.test(s)) score.hu += 1;
+    if (/[ß]/.test(s)) score.de += 2;
+    if (/[ä]/.test(s)) score.de += 1;
+
+    const ranked = LANGS.slice().sort((a, b) => score[b] - score[a]);
+    const best = ranked[0], second = ranked[1];
+    // Needs real evidence AND a clear margin - a single word ("ja", which is
+    // German but also a Hungarian interjection) must never flip the language.
+    if (score[best] < 2 || score[best] - score[second] < 2) return null;
+    return best;
+}
+
+// The language of the conversation as a whole: the MOST RECENT confident signal
+// from anything the customer said, falling back to the site language when they
+// have not given one yet. Deriving it from the history every turn (rather than
+// trusting a flag from the browser) means it survives a reload, a re-send, and a
+// client that never echoes it back.
+function conversationLang(history, question, siteLang) {
+    let lang = normLang(siteLang);
+    const scan = (text) => { const d = detectMessageLang(text); if (d) lang = d; };
+    if (Array.isArray(history)) {
+        for (const m of history) {
+            if (!m || m.role !== "user" || typeof m.content !== "string") continue;
+            scan(m.content);
+        }
+    }
+    // The current message may not be in `history` yet, depending on the caller.
+    if (typeof question === "string") scan(question);
+    return lang;
+}
+
 // Size label: bathroom band token → friendly band; free number → "N m²";
 // unknown → per-type default note.
 const SIZE_LABEL = { s_3_4: "3–4 m²", s_5_6: "5–6 m²", s_7_8: "7–8 m²", s_9_10: "9–10 m²", s_11p: "10 m² felett" };
@@ -1780,6 +1906,7 @@ function systemPromptFor(lang) {
 === LANGUAGE OVERRIDE (HIGHEST PRIORITY - OVERRIDES ALL EARLIER LANGUAGE RULES) ===
 Ignore the earlier instruction "Kizárólag MAGYARUL válaszolj". You MUST write EVERY user-visible message ONLY in ${lname}. Translate all questions, option lists, explanations and confirmations naturally and fluently into ${lname}; use correct construction terminology.
 The instructions above contain example sentences in Hungarian (e.g. "Közben bármit kérdezhet is.", "Köszönöm, összeállítom az árajánlatot!"). These are TEMPLATES, not text to copy - render their meaning in ${lname}. NEVER output any Hungarian words in a user-visible message; if you notice Hungarian slipping in, rewrite it in ${lname}.
+The EARLIER turns of this conversation may be in a different language, because the customer started in one language and then switched. Do NOT mirror the language of the previous messages and do NOT comment on the switch - simply continue in ${lname} from now on.
 DO NOT translate or alter the hidden <!--DATA:...--> block: its keys AND its token values (e.g. furdo, konyha, lakas, haz, szoba, basic, mid, premium, zuhany, zuhanykabin, kad, mindketto, marad, athelyez, igen, nem, nem_tudom, teljes, reszleges, kozmetikai, festes, festes_padlo, csere, radiator, padlofutes, hoszivattyu, yes, no, t_asap, t_month, t_halfyear, t_thisyear, t_unsure) stay EXACTLY as defined.
 All money stays in Hungarian Forint (Ft). Never use emojis or em dashes; use a plain hyphen "-".`;
 }
@@ -2000,13 +2127,19 @@ export default async function handler(request, response) {
     // This is a JSON POST API - reject everything else outright.
     if (request.method !== "POST") return response.status(405).json({ answer: "Method Not Allowed" });
 
-    // Customer's UI language (synced from the host site: hu | en | de). Drives
-    // chips, recap, quote prose and the AI's reply language. Owner e-mail/logs
-    // stay Hungarian.
-    const lang = normLang((request.body || {}).lang);
+    // Customer's language (hu | en | de). The host site's setting is only the
+    // STARTING point: whatever the customer actually writes in wins, so someone
+    // typing German on the Hungarian page gets answered in German. Drives chips,
+    // recap, quote prose, the customer e-mail and the AI's reply language. The
+    // owner's e-mail/logs stay Hungarian.
+    const siteLang = normLang((request.body || {}).lang);
+    // Declared out here so the catch at the bottom can still answer in the right
+    // language if something throws mid-turn.
+    let lang = siteLang;
 
     try {
         const { question, history, action, lead } = request.body || {};
+        lang = conversationLang(history, question, siteLang);
 
         // --- ACTION: send the owner the whole conversation ---
         // Fired by the widget when a conversation ENDS WITHOUT a finished quote
@@ -2116,6 +2249,7 @@ export default async function handler(request, response) {
                 return response.status(200).json({
                     answer: reask,
                     chips: [],
+                    lang,
                     state: baseSel,
                     estimate: runningEstimate(baseSel),
                     progress: progressFields(baseSel).filter((f) => baseSel[f] != null && String(baseSel[f]).trim() !== "").length,
@@ -2161,12 +2295,12 @@ export default async function handler(request, response) {
 
         if (!result.ok) {
             console.error(`[${provider}] API Error:`, result.error);
-            return response.status(200).json({ answer: msg(lang).aiDown });
+            return response.status(200).json({ answer: msg(lang).aiDown, lang });
         }
 
         let aiAnswer = result.text;
         if (!aiAnswer) {
-            return response.status(200).json({ answer: msg(lang).noParse });
+            return response.status(200).json({ answer: msg(lang).noParse, lang });
         }
 
         // --- STATE: extract the running DATA block from THIS message ... ---
@@ -2199,7 +2333,7 @@ export default async function handler(request, response) {
 
         aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
         const chips = nextChips(sel, lang);
-        return response.status(200).json({ answer: aiAnswer, chips, state: sel, estimate: runningEstimate(sel), progress, progressTotal });
+        return response.status(200).json({ answer: aiAnswer, chips, lang, state: sel, estimate: runningEstimate(sel), progress, progressTotal });
 
     } catch (error) {
         console.error("Function Crash:", error.message);
@@ -2239,6 +2373,7 @@ async function finishQuote(sel, history, lang, response) {
     return response.status(200).json({
         answer: customerAnswer,
         chips: [],
+        lang,
         emailOffer: EMAIL_OFFER_ENABLED,
         lead: { sel, quote },
         state: sel,

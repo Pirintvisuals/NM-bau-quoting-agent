@@ -21,7 +21,13 @@
     try { const s = localStorage.getItem("nmlang"); if (s) return normLang(s); } catch (e) {}
     return normLang(document.documentElement.getAttribute("lang"));
   }
-  let LANG = detectLang();
+  // SITE_LANG is what the host page is set to; LANG is what the CONVERSATION is
+  // actually in. They start equal, but the backend switches LANG when the
+  // customer types in another language (write in German, get answered in
+  // German). They must be tracked separately: comparing the site's language
+  // against LANG would see that switch as a site change and wipe the chat.
+  let SITE_LANG = detectLang();
+  let LANG = SITE_LANG;
 
   const STRINGS = {
     hu: {
@@ -40,6 +46,8 @@
       launcherAria: "Csevegés megnyitása - NM Bau",
       bubbleClose: "Buborék bezárása",
       chatClose: "Csevegés bezárása",
+      sendAria: "Küldés",
+      callAria: "Hívás",
       status: "Azonnal válaszol",
       placeholder: "Írja be a válaszát – vagy kérdezzen bátran…",
       inputAria: "Írja be a válaszát vagy kérdését",
@@ -82,6 +90,8 @@
       launcherAria: "Open chat - NM Bau",
       bubbleClose: "Close bubble",
       chatClose: "Close chat",
+      sendAria: "Send",
+      callAria: "Call",
       status: "Replies instantly",
       placeholder: "Type your answer – or ask us anything…",
       inputAria: "Type your answer or question",
@@ -124,6 +134,8 @@
       launcherAria: "Chat öffnen - NM Bau",
       bubbleClose: "Blase schließen",
       chatClose: "Chat schließen",
+      sendAria: "Senden",
+      callAria: "Anrufen",
       status: "Antwortet sofort",
       placeholder: "Geben Sie Ihre Antwort ein – oder fragen Sie uns…",
       inputAria: "Geben Sie Ihre Antwort oder Frage ein",
@@ -496,7 +508,7 @@
     const phone = document.createElement("a");
     phone.className = "faq-header-phone";
     phone.href = `tel:${PHONE.replace(/\s/g, "")}`;
-    phone.setAttribute("aria-label", `Hívás: ${PHONE}`);
+    phone.setAttribute("aria-label", `${t().callAria}: ${PHONE}`);
     phone.innerHTML = `${ICON.phone}<span>${PHONE}</span>`;
 
     const closeBtn = document.createElement("button");
@@ -561,7 +573,7 @@
     const sendBtn = document.createElement("button");
     sendBtn.type = "submit";
     sendBtn.className = "faq-send-btn";
-    sendBtn.setAttribute("aria-label", "Küldés");
+    sendBtn.setAttribute("aria-label", t().sendAria);
     sendBtn.innerHTML = ICON.send;
 
     // ---- Question hint bar ----
@@ -757,12 +769,14 @@
   }
 
   let lastEstimateText = null; // so we only pulse when the value actually changes
+  let lastEstimate = null;     // kept so the bar can be redrawn in another language
 
   // Update the live "Becsült ár" banner from the backend's running estimate.
   // partial = still refining (wider range); false = final, locked-in range.
   function updateEstimate(est) {
     if (!estimateBarEl) return;
-    if (!est || est.low == null || est.high == null) { estimateBarEl.style.display = "none"; lastEstimateText = null; return; }
+    if (!est || est.low == null || est.high == null) { estimateBarEl.style.display = "none"; lastEstimateText = null; lastEstimate = null; return; }
+    lastEstimate = est;
     const wasVisible = estimateBarEl.style.display !== "none";
     estimateBarEl.style.display = "flex";
     const val = estimateBarEl.querySelector(".faq-estimate-val");
@@ -823,6 +837,9 @@
       }
 
       const data = await res.json();
+      // The backend answers in whatever language the customer is writing in;
+      // follow it so the widget's own strings match the reply.
+      adoptReplyLang(data.lang);
       if (data.state && typeof data.state === "object") convState = data.state;
       if (typeof data.progress === "number" && typeof data.progressTotal === "number") {
         updateProgress(data.progress, data.progressTotal);
@@ -921,6 +938,7 @@
     lastProgress = 0;
     lastProgressTotal = 0;
     lastEstimateText = null;
+    lastEstimate = null;
     sending = false;
     thinkingEl = null;
     if (chatWindow) chatWindow.remove();
@@ -945,13 +963,68 @@
   // it was open) so it re-renders entirely in the new language.
   function applyLang() {
     const next = detectLang();
+    // Compare against the SITE language, not the conversation language. The
+    // <html lang> observer also fires when the attribute is rewritten to the
+    // same value, and a conversation that switched to German on its own must
+    // not be mistaken for a site switch and thrown away.
+    if (next === SITE_LANG) return;
+    SITE_LANG = next;
+    LANG = next;
+    updateLauncherStrings();
+    if (chatWindow) resetConversation();
+  }
+
+  // Adopt the language the backend decided the conversation is in (it follows
+  // what the customer types). Unlike a host-site switch this must NOT reset the
+  // conversation - the customer is mid-flow and the backend has already answered
+  // in the new language. Only the widget's own strings need re-rendering; the
+  // bubbles already on screen stay as they were said.
+  function adoptReplyLang(next) {
+    if (!next) return;
+    next = normLang(next);
     if (next === LANG) return;
     LANG = next;
+    updateLauncherStrings();
+    updateChromeStrings();
+  }
+
+  // Re-label the parts of the open chat window that are drawn once when it is
+  // built (header, banners, input, hints). Message bubbles are deliberately left
+  // alone: they are a record of what was actually said.
+  function updateChromeStrings() {
+    if (!chatWindow) return;
+    const set = (sel, text) => { const el = chatWindow.querySelector(sel); if (el) el.textContent = text; };
+    chatWindow.setAttribute("aria-label", t().dialogAria);
+    set(".faq-header-status", t().status);
+    set(".faq-concept-banner", t().conceptNotice);
+    set(".faq-question-hint", t().questionHint);
+    const st = chatWindow.querySelector(".faq-header-status");
+    if (st) st.insertAdjacentHTML("afterbegin", '<span class="faq-status-dot" aria-hidden="true"></span>');
+    const estLabel = estimateBarEl && estimateBarEl.firstElementChild;
+    if (estLabel) estLabel.textContent = t().estLabel;
+    if (lastEstimate) {
+      const val = chatWindow.querySelector(".faq-estimate-val");
+      const note = chatWindow.querySelector(".faq-estimate-note");
+      if (val) { lastEstimateText = t().approx + " " + fmtRange(lastEstimate.low, lastEstimate.high); val.textContent = lastEstimateText; }
+      if (note) note.textContent = lastEstimate.partial ? t().estPartial : t().estFinal;
+    }
+    const closeBtn = chatWindow.querySelector(".faq-header-close");
+    if (closeBtn) closeBtn.setAttribute("aria-label", t().chatClose);
+    const sendBtn = chatWindow.querySelector(".faq-send-btn");
+    if (sendBtn) sendBtn.setAttribute("aria-label", t().sendAria);
+    const phoneLink = chatWindow.querySelector(".faq-header-phone");
+    if (phoneLink) phoneLink.setAttribute("aria-label", t().callAria + ": " + PHONE);
+    if (inputElement) {
+      inputElement.placeholder = t().placeholder;
+      inputElement.setAttribute("aria-label", t().inputAria);
+    }
+  }
+
+  function updateLauncherStrings() {
     const launcher = document.querySelector(".faq-chat-launcher");
     if (launcher) launcher.setAttribute("aria-label", t().launcherAria);
     const tipText = document.querySelector(".faq-chat-tooltip .faq-tooltip-text");
     if (tipText) tipText.textContent = curTeasers()[teaserIdx % curTeasers().length];
-    if (chatWindow) resetConversation();
   }
 
   // Watch the host site's language signal: <html lang> (set by assets/i18n.js on
