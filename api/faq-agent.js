@@ -285,9 +285,14 @@ function makeItem(label, amount, kind, cur = "huf") {
 //  the customer gets a readable quote and NM Bau keeps its rate card private.
 // ---------------------------------------------------------------------------
 
-// Category -> the band to apply and the order it appears in. The bands are much
-// tighter than the old model's: with a fixed price list the rates are known, and
-// the only real uncertainty left is WHICH items a survey will add.
+// Category -> the band to apply and the order it appears in. The band widths
+// themselves are the existing ITEM_BAND values, NOT re-derived for the price
+// list. The headline range still came out narrower than the old model's (34%
+// against 43% on a 6 m² mid bath) simply because the mix changed: the old total
+// was dominated by two wide material lines (szaniter ±30%, csempe ±22%) that no
+// longer exist here. Worth revisiting - with fixed rates the remaining
+// uncertainty is really "which items will the survey add", not "what does a
+// trade cost", so these bands are wider than the data now justifies.
 const CATEGORY_META = {
     "BONTÁS ELŐKÉSZÍTÉSE": { order: 1, band: "demo", merge: "BONTÁS" },
     "BONTÁS": { order: 1, band: "demo" },
