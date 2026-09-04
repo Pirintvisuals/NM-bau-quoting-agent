@@ -51,24 +51,30 @@ const renoCases = [
       total: [5_900_000, 7_700_000], perM2: [95_000, 130_000] },
 ];
 
+// CHANGED 2026-09-04: the bathroom flow is now assembled from the real NM Bau
+// Törzsárlista and quotes MUNKADÍJ ONLY - the customer buys the tiles, the
+// sanitaryware and the taps. The envelopes below are therefore LABOUR bands and
+// must NOT be compared against the published turnkey market ranges used for the
+// flat/house cases above; a turnkey figure for the same bathroom is roughly this
+// plus the material spend again. The bands are set ~15% either side of the
+// assembled price-list total, so an accidental edit to a rate, a quantity or the
+// item mix trips them, while a deliberate repricing in the workbook does not.
 const cases = [
-    // Intended NM Bau bands (net): a small bathroom floor sits ~2 M, a typical mid
-    // bath 2–3 M, a big or premium one up to ~5 M (owner target).
     { name: '4 m², basic, zuhanykabin, keep, no heat',
       sel: { size: 's_3_4', tier: 'basic', washing: 'zuhanykabin', layout: 'marad', heating: 'nem' },
-      total: [1_600_000, 2_300_000], perM2: [450_000, 650_000] },
+      total: [1_700_000, 2_300_000], perM2: [420_000, 600_000] },
     { name: '6 m², mid, épített zuhanyzó (no heat possible), keep',
       sel: { size: 's_5_6', tier: 'mid', washing: 'zuhany', layout: 'marad', heating: 'nem' },
-      total: [2_300_000, 3_200_000], perM2: [430_000, 580_000] },
+      total: [2_150_000, 2_850_000], perM2: [360_000, 480_000] },
     { name: '9 m², mid, bath+shower, move, underfloor heat',
       sel: { size: '9', tier: 'mid', washing: 'mindketto', layout: 'athelyez', heating: 'igen' },
-      total: [3_200_000, 4_400_000], perM2: [360_000, 480_000] },
+      total: [2_850_000, 3_750_000], perM2: [310_000, 420_000] },
     { name: '6 m², premium, bath+shower, move, heat',
       sel: { size: 's_5_6', tier: 'premium', washing: 'mindketto', layout: 'athelyez', heating: 'igen' },
-      total: [3_400_000, 5_200_000], perM2: [600_000, 900_000] },
+      total: [2_800_000, 3_700_000], perM2: [470_000, 620_000] },
     { name: 'unknown everything (nem_tudom defaults)',
       sel: { size: 'nem_tudom', tier: 'nem_tudom', washing: 'nem_tudom', layout: 'nem_tudom', heating: 'nem_tudom' },
-      total: [2_200_000, 3_000_000], perM2: [450_000, 600_000] },
+      total: [2_000_000, 2_650_000], perM2: [400_000, 530_000] },
 ];
 
 let failures = 0;
@@ -77,7 +83,7 @@ const inRange = (v, [lo, hi]) => v >= lo && v <= hi;
 for (const c of [...cases, ...renoCases]) {
     const q = buildQuote(c.sel);
     console.log(`\n■ ${c.name}  (≈${q.area} m²)`);
-    for (const it of q.items) console.log(`   ${it.label.padEnd(52)} ${fmt(it.huf).padStart(14)}`);
+    for (const it of q.items) console.log(`   ${it.label.padEnd(52)} ${fmt(it.amount).padStart(14)}`);
     console.log(`   ${'PONT BECSLÉS'.padEnd(52)} ${fmt(q.total).padStart(14)}`);
     console.log(`   → SÁV: ${fmt(q.low)} – ${fmt(q.high)}   (${fmt(q.perM2)}/m²)`);
 

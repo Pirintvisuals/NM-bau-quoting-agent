@@ -62,8 +62,8 @@
       conceptNotice: "Ez egy előzetes, tájékoztató jellegű koncepció-kalkuláció, NEM végleges árajánlat. A pontos ár a helyszíni felméréssel alakul ki.",
       kickoff: "Szeretnék árajánlatot egy felújításra.",
       estLabel: "Becsült ár",
-      estPartial: "pontosítással szűkül (nettó)",
-      estFinal: "véglegesített sáv (nettó)",
+      estPartial: "pontosítással szűkül (ÁFA-mentes)",
+      estFinal: "véglegesített sáv (ÁFA-mentes)",
       approx: "kb.",
       million: "millió Ft",
       emailYes: "Kérem e-mailben is",
@@ -106,8 +106,8 @@
       conceptNotice: "This is a preliminary, indicative concept calculation, NOT a final quote. The exact price is set after an on-site survey.",
       kickoff: "I'd like a quote for a renovation.",
       estLabel: "Estimated price",
-      estPartial: "narrows as you refine (net)",
-      estFinal: "finalised range (net)",
+      estPartial: "narrows as you refine (VAT-free)",
+      estFinal: "finalised range (VAT-free)",
       approx: "approx.",
       million: "million Ft",
       emailYes: "Yes, e-mail it to me",
@@ -150,8 +150,8 @@
       conceptNotice: "Dies ist eine vorläufige, unverbindliche Konzept-Kalkulation, KEIN endgültiges Angebot. Der genaue Preis wird nach einer Vor-Ort-Besichtigung festgelegt.",
       kickoff: "Ich hätte gerne ein Angebot für eine Renovierung.",
       estLabel: "Geschätzter Preis",
-      estPartial: "wird durch Angaben enger (netto)",
-      estFinal: "endgültige Spanne (netto)",
+      estPartial: "wird durch Angaben enger (ohne MwSt.)",
+      estFinal: "endgültige Spanne (ohne MwSt.)",
       approx: "ca.",
       million: "Mio. Ft",
       emailYes: "Ja, bitte per E-Mail",
@@ -760,7 +760,14 @@
 
   // Friendlier range: big sums in "millió Ft" (e.g. "5,3 – 6,6 millió Ft"),
   // smaller ones in full forints. Much more scannable than 8-digit numbers.
-  function fmtRange(low, high) {
+  // The backend decides the currency from the conversation language (Hungarian
+  // = Ft off the Hungarian price list, English/German = EUR off the Austrian
+  // one) and stamps it on the estimate, so the banner just follows.
+  function fmtRange(low, high, cur) {
+    if (cur === "eur") {
+      const e = (n) => Math.round(n).toLocaleString("de-AT");
+      return `${e(low)} – ${e(high)} EUR`;
+    }
     if (high >= 1000000) {
       const m = (n) => (Math.round(n / 100000) / 10).toLocaleString("hu-HU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
       return `${m(low)} – ${m(high)} ${t().million}`;
@@ -781,7 +788,7 @@
     estimateBarEl.style.display = "flex";
     const val = estimateBarEl.querySelector(".faq-estimate-val");
     const note = estimateBarEl.querySelector(".faq-estimate-note");
-    const text = t().approx + " " + fmtRange(est.low, est.high);
+    const text = t().approx + " " + fmtRange(est.low, est.high, est.currency);
     if (val) val.textContent = text;
     if (note) note.textContent = est.partial ? t().estPartial : t().estFinal;
     // Pulse the banner when the number changes (and it was already on screen) so
@@ -1005,7 +1012,7 @@
     if (lastEstimate) {
       const val = chatWindow.querySelector(".faq-estimate-val");
       const note = chatWindow.querySelector(".faq-estimate-note");
-      if (val) { lastEstimateText = t().approx + " " + fmtRange(lastEstimate.low, lastEstimate.high); val.textContent = lastEstimateText; }
+      if (val) { lastEstimateText = t().approx + " " + fmtRange(lastEstimate.low, lastEstimate.high, lastEstimate.currency); val.textContent = lastEstimateText; }
       if (note) note.textContent = lastEstimate.partial ? t().estPartial : t().estFinal;
     }
     const closeBtn = chatWindow.querySelector(".faq-header-close");
