@@ -59,22 +59,27 @@ const renoCases = [
 // plus the material spend again. The bands are set ~15% either side of the
 // assembled price-list total, so an accidental edit to a rate, a quantity or the
 // item mix trips them, while a deliberate repricing in the workbook does not.
+// Retightened 2026-09-08 after NM Bau's answers: wall-tile removal is now per
+// m2 instead of a 100 000 Ft lump sum, and the extractor fan and the call-out
+// are no longer assumed. Previously retightened 2026-09-06, after:
+// painting/skimming and electrical work are subcontracted and no longer priced,
+// and the built tiled shower was replaced by a low-profile tray with a glass wall.
 const cases = [
     { name: '4 m², basic, zuhanykabin, keep, no heat',
       sel: { size: 's_3_4', tier: 'basic', washing: 'zuhanykabin', layout: 'marad', heating: 'nem' },
-      total: [1_700_000, 2_300_000], perM2: [420_000, 600_000] },
-    { name: '6 m², mid, épített zuhanyzó (no heat possible), keep',
+      total: [1_530_000, 2_070_000], perM2: [440_000, 590_000] },
+    { name: '6 m², mid, műmárvány zuhanytálca üvegfallal, keep',
       sel: { size: 's_5_6', tier: 'mid', washing: 'zuhany', layout: 'marad', heating: 'nem' },
-      total: [2_150_000, 2_850_000], perM2: [360_000, 480_000] },
+      total: [1_850_000, 2_510_000], perM2: [340_000, 460_000] },
     { name: '9 m², mid, bath+shower, move, underfloor heat',
       sel: { size: '9', tier: 'mid', washing: 'mindketto', layout: 'athelyez', heating: 'igen' },
-      total: [2_850_000, 3_750_000], perM2: [310_000, 420_000] },
+      total: [2_560_000, 3_470_000], perM2: [280_000, 390_000] },
     { name: '6 m², premium, bath+shower, move, heat',
       sel: { size: 's_5_6', tier: 'premium', washing: 'mindketto', layout: 'athelyez', heating: 'igen' },
-      total: [2_800_000, 3_700_000], perM2: [470_000, 620_000] },
+      total: [2_480_000, 3_350_000], perM2: [450_000, 610_000] },
     { name: 'unknown everything (nem_tudom defaults)',
       sel: { size: 'nem_tudom', tier: 'nem_tudom', washing: 'nem_tudom', layout: 'nem_tudom', heating: 'nem_tudom' },
-      total: [2_000_000, 2_650_000], perM2: [400_000, 530_000] },
+      total: [1_750_000, 2_370_000], perM2: [350_000, 470_000] },
 ];
 
 let failures = 0;

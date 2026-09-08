@@ -638,6 +638,203 @@
     return html;
   }
 
+
+  // --- Contact form --------------------------------------------------------
+  // The tail of the flow is admin, not consultation: name, location, e-mail,
+  // phone and an optional budget. Asking them one bubble at a time is four
+  // extra round trips and reads like an interrogation, so the backend hands
+  // over a form and the customer fills it in one go. The quote renders straight
+  // after, because budget travels with it.
+  let formEl = null;
+
+  function clearContactForm() {
+    if (formEl) { formEl.remove(); formEl = null; }
+  }
+
+  function renderContactForm(form, errors) {
+    clearChips();
+    clearContactForm();
+
+    const wrap = document.createElement("form");
+    wrap.className = "faq-form";
+    wrap.noValidate = true;
+
+    if (form.title) {
+      const h = document.createElement("div");
+      h.className = "faq-form-title";
+      h.textContent = form.title;
+      wrap.appendChild(h);
+    }
+
+    const inputs = {};
+    (form.fields || []).forEach((f) => {
+      const row = document.createElement("label");
+      row.className = "faq-form-row";
+
+      const lab = document.createElement("span");
+      lab.className = "faq-form-label";
+      lab.textContent = f.label;
+      row.appendChild(lab);
+
+      const input = document.createElement("input");
+      input.type = f.type || "text";
+      input.className = "faq-form-input ph-no-capture"; // never record PII in replay
+      input.placeholder = f.placeholder || "";
+      input.value = f.value || "";
+      if (f.autocomplete) input.autocomplete = f.autocomplete;
+      // inputmode gets the right phone keypad on mobile without a type change
+      if (f.key === "phone") input.inputMode = "tel";
+      row.appendChild(input);
+
+      const err = document.createElement("span");
+      err.className = "faq-form-err";
+      row.appendChild(err);
+
+      inputs[f.key] = { input: input, err: err, row: row };
+      wrap.appendChild(row);
+    });
+
+    // Optional budget: a select, so it can be left alone without typing.
+    let budgetSel = null;
+    if (form.budget && form.budget.options && form.budget.options.length) {
+      const row = document.createElement("label");
+      row.className = "faq-form-row";
+      const lab = document.createElement("span");
+      lab.className = "faq-form-label";
+      lab.textContent = form.budget.label;
+      row.appendChild(lab);
+      budgetSel = document.createElement("select");
+      budgetSel.className = "faq-form-input ph-no-capture";
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "-";
+      budgetSel.appendChild(blank);
+      form.budget.options.forEach((o) => {
+        const opt = document.createElement("option");
+        opt.value = o;
+        opt.textContent = o;
+        if (form.budget.value === o) opt.selected = true;
+        budgetSel.appendChild(opt);
+      });
+      row.appendChild(budgetSel);
+      wrap.appendChild(row);
+    }
+
+    const btn = document.createElement("button");
+    btn.type = "submit";
+    btn.className = "faq-form-submit";
+    btn.textContent = form.submit || "OK";
+    wrap.appendChild(btn);
+
+    if (form.why) {
+      const why = document.createElement("div");
+      why.className = "faq-form-why";
+      why.textContent = form.why;
+      wrap.appendChild(why);
+    }
+
+    // Mark whatever the server rejected, and put the cursor in the first one.
+    if (errors) {
+      let focused = false;
+      Object.keys(errors).forEach((k) => {
+        const f = inputs[k];
+        if (!f) return;
+        f.row.classList.add("faq-form-row--bad");
+        f.err.textContent = errors[k].replace(/\*\*/g, "");
+        if (!focused) { try { f.input.focus(); } catch (e) {} focused = true; }
+      });
+    }
+
+    wrap.onsubmit = (e) => {
+      e.preventDefault();
+      if (sending) return;
+      const values = {};
+      Object.keys(inputs).forEach((k) => { values[k] = inputs[k].input.value.trim(); });
+      if (budgetSel && budgetSel.value) values.budget = budgetSel.value;
+      submitContactForm(values, form);
+    };
+
+    messagesContainer.appendChild(wrap);
+    formEl = wrap;
+    scrollToBottom();
+    try { const first = wrap.querySelector("input"); if (first && !errors) first.focus(); } catch (e) {}
+  }
+
+  // Send the whole form in one request. On rejection the form comes back with
+  // the bad fields marked; on success the reply (normally the quote) renders.
+  async function submitContactForm(values, form) {
+    if (sending) return;
+    sending = true;
+
+    // What they typed, echoed back as their own message once it is ACCEPTED.
+    // A rejected submission must leave no trace: the form simply comes back with
+    // the bad fields marked, so a typo does not litter the transcript (and the
+    // owner's copy of it) with a half-wrong set of contact details.
+    const shown = (form.fields || [])
+      .map((f) => values[f.key])
+      .filter(Boolean)
+      .join(" · ");
+    clearContactForm();
+    addThinking();
+
+    try {
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact: values, history: conversationHistory, state: convState, lang: LANG }),
+      });
+      removeThinking();
+      if (!res.ok) { addMessage("bot", t().errGeneric); sending = false; return; }
+      const data = await res.json();
+      adoptReplyLang(data.lang);
+      if (data.state && typeof data.state === "object") convState = data.state;
+      if (typeof data.progress === "number" && typeof data.progressTotal === "number") {
+        updateProgress(data.progress, data.progressTotal);
+        lastProgress = data.progress;
+        lastProgressTotal = data.progressTotal;
+      }
+      if ("estimate" in data) updateEstimate(data.estimate);
+
+      // Rejected: put the form back with the offending fields marked, and leave
+      // the conversation itself untouched.
+      if (data.formErrors && data.form) {
+        renderContactForm(data.form, data.formErrors);
+        sending = false;
+        return;
+      }
+
+      // Accepted - now it is worth showing.
+      if (shown) {
+        addMessage("user", shown);
+        conversationHistory.push({ role: "user", content: shown });
+      }
+
+      if (data.lead && !quoteDone) {
+        quoteDone = true;
+        const st = data.lead.sel || {}, q = data.lead.quote || {};
+        track("quote_completed", {
+          project_type: st.projectType, size: st.size, tier: st.tier,
+          quote_low: q.low, quote_high: q.high,
+        });
+      }
+
+      const parts = String(data.answer || "").split("[[SPLIT]]").map((x) => x.trim()).filter(Boolean);
+      parts.forEach((x) => addMessage("bot", x));
+      if (parts.length) conversationHistory.push({ role: "assistant", content: parts.join("\n\n") });
+
+      if (data.emailOffer && data.lead) { lastLead = data.lead; renderEmailOffer(); }
+      else if (data.form) renderContactForm(data.form, data.formErrors);
+      else renderChips(data.chips);
+      armIdleFlush();
+    } catch (err) {
+      console.error(err);
+      removeThinking();
+      addMessage("bot", t().errConnect);
+    } finally {
+      sending = false;
+    }
+  }
+
   function clearChips() {
     messagesContainer.querySelectorAll(".faq-chips").forEach((c) => c.remove());
   }
@@ -893,6 +1090,8 @@
       if (data.emailOffer && data.lead) {
         lastLead = data.lead;
         renderEmailOffer();
+      } else if (data.form) {
+        renderContactForm(data.form);
       } else {
         renderChips(data.chips);
       }
@@ -939,6 +1138,7 @@
     transcriptSentAt = 0;
     conversationHistory = [];
     convState = {};
+    formEl = null;
     started = false;
     lastLead = null;
     quoteDone = false;

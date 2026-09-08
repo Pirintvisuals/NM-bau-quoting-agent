@@ -152,7 +152,7 @@ export const PRICE_LIST = {
     "falfeluletek_epitolemezes_kiegyenlitese": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 8000, eur: 30, unit: "m²", hu: "Falfelületek építőlemezes kiegyenlítése", de: "Ausgleich der Wandflächen mit Bauplatten" },
     "falfeluletek_es_aljzatbeton_melyalapozasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 1000, eur: 5, unit: "m²", hu: "Falfelületek és aljzatbeton mélyalapozása", de: "Grundierung der Wandflächen und des Estrichs" },
     "falhornyok_visszajavitasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 45000, eur: 170, unit: "átalány", hu: "Falhornyok visszajavítása", de: "Schließen und Ausbessern der Installationsschlitze" },
-    "fogado_falfelulet_kvarchomokos_tapadohid_kez": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 4000, eur: 5, unit: "m²", hu: "Fogadó falfelület kvarchomokos tapadóhíd kezelése", de: "Auftragen einer quarzsandhaltigen Haftbrücke auf die Wandflächen" },
+    "fogado_falfelulet_kvarchomokos_tapadohid_kez": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 4000, eur: 15, unit: "m²", hu: "Fogadó falfelület kvarchomokos tapadóhíd kezelése", de: "Auftragen einer quarzsandhaltigen Haftbrücke auf die Wandflächen" },
     "fogado_falfeluletek_kezi_simitovakolasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 6000, eur: 20, unit: "m²", hu: "Fogadó falfelületek kézi simítóvakolása", de: "Handglättputz der Wandflächen" },
     "gipszkarton_felulet_helyreallitasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 8000, eur: 30, unit: "m²", hu: "Gipszkarton felület helyreállítása", de: "Wiederherstellung der Gipskartonfläche" },
     "kenheto_vizszigeteles_kialakitasa_a_zuhanyte": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 4000, eur: 15, unit: "m²", hu: "Kenhető vízszigetelés kialakítása a zuhanytérben", de: "Herstellung einer Flüssigabdichtung im Duschbereich" },
@@ -168,7 +168,7 @@ export const PRICE_LIST = {
     "epitett_zuhanyzo_kialakitasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 150000, eur: 560, unit: "átalány", hu: "Épített zuhanyzó kialakítása", de: "Herstellung einer bodengleichen Dusche" },
     "epitett_uloke_ulotalapzat_kialakitasa_a_zuha": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 120000, eur: 450, unit: "db", hu: "Épített ülőke / ülőtalapzat kialakítása a zuhanyzóban", de: "Herstellung einer gemauerten Sitzbank im Duschbereich" },
     "tapadohid_felvitele": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 3000, eur: 25, unit: "m²", hu: "Tapadóhíd felvitele", de: "Auftragen einer Haftgrundierung" },
-    "hajlaterosito_szalag_agyazasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 2000, eur: 20, unit: "fm", hu: "Hajlaterősítő szalag ágyazása", de: "Einbettung des Dichtbandes in den Eckbereichen" },
+    "hajlaterosito_szalag_agyazasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 2000, eur: 10, unit: "fm", hu: "Hajlaterősítő szalag ágyazása", de: "Einbettung des Dichtbandes in den Eckbereichen" },
     "vizszigeteles_kenheto_foliaval": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 3000, eur: 25, unit: "m²", hu: "Vízszigetelés kenhető fóliával", de: "Abdichtung mit Flüssigfolie" },
     "gipszkarton_falak_helyreallitasa": { cat: "ELŐKÉSZÍTÉS / KŐMŰVES MUNKÁK", huf: 6000, eur: 25, unit: "m²", hu: "Gipszkarton falak helyreállítása", de: "Instandsetzung der Gipskartonwände" },
 
@@ -238,6 +238,9 @@ export const PRICE_LIST = {
 
     // --- EGYÉB ---
     "kiszallas": { cat: "EGYÉB", huf: 65000, eur: 240, unit: "alkalom", hu: "Kiszállás", de: "Anfahrt" },
+
+    // --- BONTÁS ---
+    "falicsempe_bontasa_m2": { cat: "BONTÁS", huf: 4500, eur: 17, unit: "m²", hu: "Falicsempe bontása / levésése", de: "Abbruch / Entfernen der Wandfliesen" },
 };
 
 // The two rows that have no Austrian price yet fall back to this, the

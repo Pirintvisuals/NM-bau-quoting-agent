@@ -56,58 +56,10 @@
 // ---------------------------------------------------------------------------
 import { PRICE_LIST, rate, FT_PER_EUR_FALLBACK } from "./pricelist.js";
 
-const MODEL = {
-    // Variable, area-scaling labour + consumables (per m² of TILED surface,
-    // i.e. floor + walls). Excludes the tile material itself (separate line).
-    tileLabor:   { basic: 10500, mid: 13000, premium: 16000 }, // Ft / m² felület
-    smallRoomUplift: 3000, // +Ft/m² tiling labour when area ≤ 4 m² (fiddly small jobs)
-
-    // Tile + floor-tile MATERIAL, per m² of tiled surface (×1.1 for waste).
-    tileMaterial: { basic: 7000, mid: 13000, premium: 24000 },
-
-    // Demolition + debris removal: per m² of tiled surface + fixed container/strip.
-    // The fixed part (container hire + haulage + mobilisation) is a real floor that
-    // every job carries - set realistically so the smallest jobs aren't under-quoted.
-    demoPerM2: 4500,
-    demoFixed: 170000,
-
-    // Screed levelling (aljzatkiegyenlítés): over the whole FLOOR, per m².
-    screedPerM2: 7500,
-    // Two-layer brush-on waterproofing (kétrétegű kenhető vízszigetelés): over the
-    // FLOOR *plus* the wet-zone walls behind the shower/bath (not just the floor -
-    // this is the fix for the previously under-priced prep line). Per m².
-    waterproofPerM2: 8500,
-    // Primer, corner/joint sealing tapes, floor drain collar - fixed wet-room setup.
-    prepFixed: 50000,
-
-    // Plumbing (water + waste pipes, rough-in, fixture connections), by layout.
-    plumbingKeep: 360000,   // elrendezés marad (300-500e sávban)
-    plumbingMove: 480000,   // áthelyezés / új elrendezés (300-500e sávban)
-    plumbingBathExtra: 60000,   // +kád külön bekötés
-    plumbingBothExtra: 90000,   // +kád ÉS zuhany
-
-    // Electrical (lights, sockets, mirror, towel rail, ventilation), by tier.
-    electrical: { basic: 170000, mid: 220000, premium: 300000 },
-
-    // Sanitary base set: WC + washbasin + vanity + taps + accessories, by tier.
-    sanitaryBase: { basic: 430000, mid: 620000, premium: 1050000 },
-
-    // Shower / bath element (appliance + glass/screen + install), by choice & tier.
-    washing: {
-        zuhany:      { basic: 200000, mid: 330000, premium: 540000 }, // épített zuhanyzó üveg fallal
-        zuhanykabin: { basic: 150000, mid: 240000, premium: 410000 }, // komplett zuhanykabin
-        kad:         { basic: 150000, mid: 240000, premium: 430000 }, // fürdőkád + kádparaván
-        mindketto:   { basic: 320000, mid: 470000, premium: 770000 }, // kád + külön zuhany
-    },
-
-    // Painting + skim (ceiling and non-tiled wall parts): per m² floor + fixed.
-    paintPerM2: 5500,
-    paintFixed: 25000,
-
-    // OPTION - electric underfloor heating mat + thermostat + install.
-    heatPerM2: 22000,
-    heatFixed: 55000,
-};
+// The old bathroom model's constants lived here - per-m² averages for tiling,
+// plumbing, sanitaryware and so on. Every one of them was replaced on
+// 2026-09-04 by a real Törzsárlista rate (see pricelist.js), leaving the block
+// with no references at all, so it is gone. The whole-property flows use RENO.
 
 // ---------------------------------------------------------------------------
 //  WHOLE-PROPERTY PRICE MODEL (HUF) - full flat / house / kitchen / single room.
@@ -331,12 +283,22 @@ const GROUP_LABEL = {
     "EGYÉB": "Kiszállás",
 };
 
+// Trades NM Bau currently puts out to a subcontractor. The work still happens,
+// but the subcontractor prices it, so the widget must not put a number on it -
+// it would be quoting someone else's rate. Named in the customer copy as an
+// explicit exclusion rather than silently dropped. (Milán, 2026-09-06.)
+const SUBCONTRACTED_CATEGORIES = ["FESTÉS / GLETTELÉS", "VILLANYSZERELÉS"];
+
 class Bill {
     constructor(cur = "huf") { this.cur = cur; this.lines = []; }
     // qty defaults to 1 for the per-job (átalány / db) items; area- and
     // metre-based items pass a real quantity.
     add(id, qty = 1) {
         if (!(qty > 0)) return this;
+        // Subcontracted work is skipped here rather than at the call site, so a
+        // trade cannot creep back into the price by adding one more item to it.
+        const it = PRICE_LIST[id];
+        if (it && SUBCONTRACTED_CATEGORIES.includes(it.cat)) return this;
         this.lines.push({ id, qty, amount: rate(id, this.cur) * qty });
         return this;
     }
@@ -511,17 +473,27 @@ const bathCount = (b) => (b === "2" ? 2 : b === "3p" ? 3 : 1);
 // approximated as perimeter × tiling height, less an allowance for door/fittings.
 // Perimeter uses 4.3·√A (a touch above a perfect square, since real bathrooms are
 // rectangular). Tiling height assumed ~2.2 m.
+// Room perimeter for a floor area, assuming the 1:1.5-ish proportions of a real
+// bathroom: 2*(w+h) where w*h = A. Checked against the wall areas NM Bau quoted
+// on 2026-09-08 - 4 m² -> 17 m², 6 m² -> 21 m², 8 m² -> 24 m² of wall - which
+// this reproduces to within 0.2 m².
+const ROOM_PERIMETER_K = 4.08;
+// Tiled height. NM Bau gave two figures per room, the second ~19% higher: tiling
+// to 2.1 m and tiling to the ceiling. The lower one is the default here, so the
+// quote never assumes the more expensive job on the customer's behalf.
+const TILE_HEIGHT_M = 2.1;
+
+function roomPerimeter(A) {
+    return ROOM_PERIMETER_K * Math.sqrt(A);
+}
 function tiledSurface(A) {
-    const wall = Math.max(0, 4.3 * Math.sqrt(A) * 2.2 - 2.5);
+    const wall = Math.max(0, roomPerimeter(A) * TILE_HEIGHT_M);
     return { floor: A, wall, total: A + wall };
 }
 
 // Wet-zone wall area to waterproof behind the shower/bath (m²). It grows with the
 // room but is bounded - a tiny bathroom still needs a real shower splash zone,
 // a large one doesn't waterproof every wall to the ceiling.
-function wetWallArea(A) {
-    return Math.min(7, Math.max(3, A));
-}
 
 // The old parametric bathroom model lived here. It was replaced on 2026-09-04 by
 // buildBathroom() further down, which assembles the same quote from the real
@@ -761,7 +733,9 @@ function convertQuote(q, cur, basis) {
 //
 //  The customer answers only five things, so anything not asked is taken at the
 //  most common configuration for a full bathroom gut - a genuine renovation
-//  always carries these trades. `tier` cannot move a RATE (the price list has
+//  always carries these trades. What is deliberately NOT in here, per NM Bau on
+//  2026-09-08: the DN100 extractor fan (few customers ask for one), the call-out
+//  charge, and anything electrical (subcontracted, quoted separately). `tier` cannot move a RATE (the price list has
 //  one price per job), so it moves the SPEC instead: what a basic, mid and
 //  premium bathroom actually contains.
 // ---------------------------------------------------------------------------
@@ -773,13 +747,16 @@ function buildBathroom(sel, cur = "huf") {
     const washing = ["zuhany", "zuhanykabin", "kad", "mindketto"].includes(sel.washing) ? sel.washing : "zuhanykabin";
     const moved = sel.layout === "athelyez";
     const { wall, total: T } = tiledSurface(A);
-    const perimeter = 4.3 * Math.sqrt(A);          // room perimeter, for running-metre items
+    const perimeter = roomPerimeter(A);            // for the running-metre items
     const wetWall = Math.min(9, Math.max(4, A));   // tanked wall area behind shower/bath
 
     const B = new Bill(cur);
     const hasShower = washing !== "kad";
     const hasBath = washing === "kad" || washing === "mindketto";
-    const builtIn = washing === "zuhany";          // épített (walk-in) shower
+    // "zuhany" is now a low-profile cultured-marble tray with a glass wall, not
+    // a built tiled shower - NM Bau stopped building those (2026-09-06). Both
+    // shower options therefore get a tray; only the enclosure differs.
+    const glassWall = washing === "zuhany";        // tálca + szabadonálló üvegfal
     const concealedWc = tier !== "basic";          // fali WC + beépített tartály
 
     // --- Site protection: the workbook sizes this S/M/L/XL by job size ---
@@ -789,7 +766,11 @@ function buildBathroom(sel, cur = "huf") {
         : "takarasi_munkak_utvonalvedelem_porvedo_ajto4");
 
     // --- Bontás ---
-    B.add("falicsempe_bontasa_levesese");
+    // Per m² of wall. The workbook's 100 000 Ft lump sum for the same work is a
+    // one-off NM Bau has used on a bathroom or two, not the normal charge
+    // (Milán, 2026-09-08). The floor-tile row is still the lump sum - no m² rate
+    // for it has been confirmed yet.
+    B.add("falicsempe_bontasa_m2", wall);
     B.add("jarolap_padlolap_bontasa");
     B.add("mosdo_es_alsoszekreny_bontasa_elszallitassal");
     B.add("wc_bontasa_elszallitassal");
@@ -804,9 +785,12 @@ function buildBathroom(sel, cur = "huf") {
     B.add("mosdo_hideg_melegviz_es_csatornakiallas_kial");
     if (hasShower) B.add("hideg_es_melegviz_kiallas_kialakitasa_zuhany");
     if (hasBath) B.add("hideg_es_melegviz_kiallas_kialakitasa_kadcsa");
-    B.add(concealedWc ? "wc_allvany_beepitese_es_bekotese" : "monoblokkos_tartalyos_wc_beepitese");
-    if (builtIn) B.add("zuhanyfolyoka_beallitasa_es_bekotese_epitett");
-    else if (hasShower) B.add("zuhanytalca_beepitese_es_bekotese");
+    // "Alapszerelés" and "beépítés/felszerelés" are separate jobs, and a WC needs
+    // both (Milán, 2026-09-08): the rough-in forms the waste pipe and the cold
+    // feed, the fitting puts the ceramic on it. Priced as a pair either way -
+    // a frame + pan for the concealed cistern, a rough-in + unit for a monoblock.
+    B.add(concealedWc ? "wc_allvany_beepitese_es_bekotese" : "monoblokkos_tartalyos_wc_alapszerelese_hideg");
+    if (hasShower) B.add("zuhanytalca_beepitese_es_bekotese");
     if (hasBath) B.add("kad_beepitese_es_bekotese");
     B.add("mosogep_hidegviz_es_csatornakiallas_kialakit");
     // Moving the layout means re-routing the supply, not just reconnecting it.
@@ -820,7 +804,6 @@ function buildBathroom(sel, cur = "huf") {
         B.add("torolkozoszarito_radiator_alapszereles");
         B.add("torolkozoszarito_radiator_felszerelese");
     }
-    B.add("dn100_fali_elszivo_ventilator_kialakitasa");
     if (sel.heating === "igen") B.add("elektromos_futokabel_fektetese_jarolap_ala", A);
 
     // --- Előkészítés / kőműves ---
@@ -830,12 +813,11 @@ function buildBathroom(sel, cur = "huf") {
     B.add("kenheto_vizszigeteles_kialakitasa_a_zuhanyte", A + wetWall);
     B.add("hajlaterosito_szalag_agyazasa", perimeter);
     B.add("falhornyok_visszajavitasa");
-    if (builtIn) B.add("epitett_zuhanyzo_kialakitasa");
+    if (hasShower) B.add("zuhanytalca_perem_vizszigetelese");
     if (concealedWc) B.add("wc_allvany_dobozolasa_impregnalt_gipszkarton");
     if (hasBath) B.add("akril_kad_elotetfal_falazasa_ytongbol");
     if (tier === "premium") {
         B.add("melyitett_polc_niche_kialakitasa_a_zuhanyter");
-        if (builtIn) B.add("epitett_uloke_ulotalapzat_kialakitasa_a_zuha");
     }
 
     // --- Hidegburkolás ---
@@ -854,22 +836,24 @@ function buildBathroom(sel, cur = "huf") {
     B.add("allando_aramellatas_kialakitasa_mosdoszekren");
 
     // --- Szerelvényezés ---
-    B.add("wc_csesze_felszerelese");
-    if (concealedWc) B.add("wc_nyomolap_felszerelese");
+    if (concealedWc) {
+        B.add("wc_csesze_felszerelese");
+        B.add("wc_nyomolap_felszerelese");
+    } else {
+        B.add("monoblokkos_tartalyos_wc_beepitese");
+    }
     B.add("mosdoszekreny_felszerelese");
     B.add("mosdocsaptelep_felszerelese");
     if (hasShower) B.add("zuhanycsaptelep_es_zuhanyszett_felszerelese");
     if (hasBath) B.add("kadcsaptelep_felszerelese");
-    if (builtIn) B.add("zuhanyfal_szabadonallo_uvegfal_felszerelese");
+    if (glassWall) B.add("zuhanyfal_szabadonallo_uvegfal_felszerelese");
     else if (hasShower) B.add("zuhanykabin_felszerelese");
     if (hasBath) B.add("kadparavan_felszerelese");
     B.add("tukros_szekreny_felszerelese");
-    if (tier !== "basic") B.add("tukros_szekreny_villamossagi_bekotese");
     B.add("furdoszobai_wc_kiegeszitok_felszerelese");
 
     // --- Befejező + kiszállás ---
     B.add("szaniter_szilikonozas_hezagtomites", perimeter * 0.7);
-    B.add("kiszallas");
 
     return finalize(B.toItems(), A, cur);
 }
@@ -890,10 +874,11 @@ export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue
 // matters if the customer wants new furniture), so this takes the state too.
 function projectFields(pt, sel = {}) {
     switch (pt) {
-        // Épített (csempézett) zuhanyzó alá nem kerül elektromos padlófűtés, ezért
-        // azt a kérdést ilyenkor kihagyjuk.
-        case "furdo":  return ["size", "tier", "washing", "layout",
-            ...(sel.washing === "zuhany" ? [] : ["heating"])];
+        // The built, tiled shower used to rule out electric underfloor heating and
+        // the question was skipped for it. NM Bau stopped building those
+        // (2026-09-06) - a low-profile tray sits on the same floor as everything
+        // else, so underfloor heating is on the table again for every option.
+        case "furdo":  return ["size", "tier", "washing", "layout", "heating"];
         case "lakas":  return ["size", "scope", "tier", "bathrooms", "kitchen"];
         case "haz":    return ["size", "scope", "tier", "bathrooms", "kitchen"];
         case "konyha": return ["size", "tier", "furniture",
@@ -1062,7 +1047,7 @@ function resolveBudget(answer, sel, lang = "hu") {
 const CHIP_LABELS = {
     projectType: ["Fürdőszoba", "Konyha", "Teljes lakás", "Családi ház", "Egy szoba"],
     tier: ["Alap / takarékos", "Közepes", "Prémium", "Nem tudom"],
-    washing: ["Épített zuhanyzó (üveg fallal)", "Zuhanykabin", "Kád", "Kád és zuhany", "Nem tudom"],
+    washing: ["Műmárvány zuhanytálca (üvegfallal)", "Zuhanykabin", "Kád", "Kád és zuhany", "Nem tudom"],
     layout: ["Marad a mostani elrendezés", "Áthelyezzük", "Nem tudom"],
     heating: ["Kérek padlófűtést", "Nem szükséges", "Nem tudom"],
     scope: ["Teljes (mindent cserélünk)", "Részleges (felületek + néhány szakág)", "Kozmetikai (festés, burkolat)", "Nem tudom"],
@@ -1104,7 +1089,7 @@ const SIZE_VALUES = {
 const CHOICE_VALUES = {
     projectType: { "fürdőszoba": "furdo", "konyha": "konyha", "teljes lakás": "lakas", "családi ház": "haz", "egy szoba": "szoba" },
     tier: { "alap / takarékos": "basic", "közepes": "mid", "prémium": "premium", "nem tudom": "nem_tudom" },
-    washing: { "épített zuhanyzó (üveg fallal)": "zuhany", "zuhanykabin": "zuhanykabin", "kád": "kad", "kád és zuhany": "mindketto", "nem tudom": "nem_tudom" },
+    washing: { "műmárvány zuhanytálca (üvegfallal)": "zuhany", "zuhanykabin": "zuhanykabin", "kád": "kad", "kád és zuhany": "mindketto", "nem tudom": "nem_tudom" },
     layout: { "marad a mostani elrendezés": "marad", "áthelyezzük": "athelyez", "nem tudom": "nem_tudom" },
     heating: { "kérek padlófűtést": "igen", "nem szükséges": "nem", "nem tudom": "nem_tudom" },
     scope: { "teljes (mindent cserélünk)": "teljes", "részleges (felületek + néhány szakág)": "reszleges", "kozmetikai (festés, burkolat)": "kozmetikai", "nem tudom": "nem_tudom" },
@@ -1358,7 +1343,7 @@ function dropSkipAhead(sel, trusted) {
 const LABELS = {
     projectType: { furdo: "Fürdőszoba", konyha: "Konyha", lakas: "Teljes lakás", haz: "Családi ház", szoba: "Egy szoba" },
     tier: { basic: "Alap / takarékos", mid: "Közepes", premium: "Prémium", nem_tudom: "Nem tudja (alap: közepes)" },
-    washing: { zuhany: "Épített zuhanyzó (üveg fallal)", zuhanykabin: "Zuhanykabin", kad: "Kád", mindketto: "Kád és zuhany", nem_tudom: "Nem tudja (alap: zuhanykabin)" },
+    washing: { zuhany: "Műmárvány zuhanytálca (üvegfallal)", zuhanykabin: "Zuhanykabin", kad: "Kád", mindketto: "Kád és zuhany", nem_tudom: "Nem tudja (alap: zuhanykabin)" },
     layout: { marad: "Marad a mostani", athelyez: "Áthelyezés (új elrendezés)", nem_tudom: "Nem tudja (alap: marad)" },
     heating: { igen: "Igen, padlófűtéssel", nem: "Nem", nem_tudom: "Nem tudja (alap: nincs)" },
     scope: { teljes: "Teljes (gépészet, villany, minden)", reszleges: "Részleges (felületek + néhány szakág)", kozmetikai: "Kozmetikai (festés, burkolat)", nem_tudom: "Nem tudja (alap: részleges)" },
@@ -1403,7 +1388,7 @@ const I18N_LABELS = {
     en: {
         projectType: { furdo: "Bathroom", konyha: "Kitchen", lakas: "Whole flat", haz: "Family house", szoba: "A single room" },
         tier: { basic: "Basic / budget", mid: "Mid-range", premium: "Premium", nem_tudom: "Not sure (default: mid-range)" },
-        washing: { zuhany: "Walk-in shower (glass panel)", zuhanykabin: "Shower cabin", kad: "Bathtub", mindketto: "Bath and shower", nem_tudom: "Not sure (default: shower cabin)" },
+        washing: { zuhany: "Cultured marble shower tray (glass panel)", zuhanykabin: "Shower cabin", kad: "Bathtub", mindketto: "Bath and shower", nem_tudom: "Not sure (default: shower cabin)" },
         layout: { marad: "Keep current", athelyez: "Relocate (new layout)", nem_tudom: "Not sure (default: keep)" },
         heating: { igen: "Yes, with underfloor heating", nem: "No", nem_tudom: "Not sure (default: none)" },
         scope: { teljes: "Full (plumbing, electrics, everything)", reszleges: "Partial (surfaces + some trades)", kozmetikai: "Cosmetic (paint, tiling)", nem_tudom: "Not sure (default: partial)" },
@@ -1431,7 +1416,7 @@ const I18N_LABELS = {
     de: {
         projectType: { furdo: "Badezimmer", konyha: "Küche", lakas: "Ganze Wohnung", haz: "Einfamilienhaus", szoba: "Ein Zimmer" },
         tier: { basic: "Einfach / sparsam", mid: "Mittel", premium: "Premium", nem_tudom: "Weiß nicht (Standard: Mittel)" },
-        washing: { zuhany: "Gemauerte Dusche (Glaswand)", zuhanykabin: "Duschkabine", kad: "Badewanne", mindketto: "Wanne und Dusche", nem_tudom: "Weiß nicht (Standard: Duschkabine)" },
+        washing: { zuhany: "Mineralguss-Duschtasse (Glaswand)", zuhanykabin: "Duschkabine", kad: "Badewanne", mindketto: "Wanne und Dusche", nem_tudom: "Weiß nicht (Standard: Duschkabine)" },
         layout: { marad: "Bleibt", athelyez: "Verlegen (neue Anordnung)", nem_tudom: "Weiß nicht (Standard: bleibt)" },
         heating: { igen: "Ja, mit Fußbodenheizung", nem: "Nein", nem_tudom: "Weiß nicht (Standard: keine)" },
         scope: { teljes: "Komplett (Installation, Elektrik, alles)", reszleges: "Teilweise (Oberflächen + einige Gewerke)", kozmetikai: "Kosmetisch (Malern, Beläge)", nem_tudom: "Weiß nicht (Standard: teilweise)" },
@@ -1469,7 +1454,7 @@ const CHIP_LABELS_I18N = {
     en: {
         projectType: ["Bathroom", "Kitchen", "Whole flat", "Family house", "A single room"],
         tier: ["Basic / budget", "Mid-range", "Premium", "Not sure"],
-        washing: ["Walk-in shower (glass panel)", "Shower cabin", "Bathtub", "Bath and shower", "Not sure"],
+        washing: ["Cultured marble shower tray (glass panel)", "Shower cabin", "Bathtub", "Bath and shower", "Not sure"],
         layout: ["Keep the current layout", "Relocate it", "Not sure"],
         heating: ["Yes, underfloor heating", "Not needed", "Not sure"],
         scope: ["Full (replace everything)", "Partial (surfaces + some trades)", "Cosmetic (paint, tiling)", "Not sure"],
@@ -1491,7 +1476,7 @@ const CHIP_LABELS_I18N = {
     de: {
         projectType: ["Badezimmer", "Küche", "Ganze Wohnung", "Einfamilienhaus", "Ein Zimmer"],
         tier: ["Einfach / sparsam", "Mittel", "Premium", "Weiß nicht"],
-        washing: ["Gemauerte Dusche (Glaswand)", "Duschkabine", "Badewanne", "Wanne und Dusche", "Weiß nicht"],
+        washing: ["Mineralguss-Duschtasse (Glaswand)", "Duschkabine", "Badewanne", "Wanne und Dusche", "Weiß nicht"],
         layout: ["Aktuelle Anordnung bleibt", "Wird verlegt", "Weiß nicht"],
         heating: ["Ja, Fußbodenheizung", "Nicht nötig", "Weiß nicht"],
         scope: ["Komplett (alles wird erneuert)", "Teilweise (Oberflächen + einige Gewerke)", "Kosmetisch (Malern, Beläge)", "Weiß nicht"],
@@ -1896,9 +1881,9 @@ function sanitizeChoices(s) {
 // by the chat recap and both e-mails so they never drift apart.
 // Recap-row key labels, per language.
 const RECAP_KEYS = {
-    hu: { type: "Típus", size: "Méret", finish: "Kivitelezési szint", shower: "Zuhany / kád", layout: "Elrendezés", heat: "Padlófűtés", scope: "Munka jellege", baths: "Fürdőszobák", kitchen: "Konyha", condition: "Jelenlegi állapot", walls: "Falmozgatás", floor: "Padló jellege", windows: "Ablakcsere", heatsys: "Fűtés", klima: "Klíma", newkitchen: "Új konyhabútor", units: "Bútor hossza", appliances: "Beépített gépek", showerNA: "Nem lehetséges (épített zuhanyzó)" },
-    en: { type: "Type", size: "Size", finish: "Finish level", shower: "Shower / bath", layout: "Layout", heat: "Underfloor heating", scope: "Type of work", baths: "Bathrooms", kitchen: "Kitchen", condition: "Current condition", walls: "Wall changes", floor: "Floor type", windows: "Window replacement", heatsys: "Heating", klima: "Air conditioning", newkitchen: "New kitchen units", units: "Units length", appliances: "Built-in appliances", showerNA: "Not possible (walk-in shower)" },
-    de: { type: "Typ", size: "Größe", finish: "Ausstattungsniveau", shower: "Dusche / Wanne", layout: "Anordnung", heat: "Fußbodenheizung", scope: "Art der Arbeiten", baths: "Bäder", kitchen: "Küche", condition: "Aktueller Zustand", walls: "Wandänderungen", floor: "Bodenart", windows: "Fenstertausch", heatsys: "Heizung", klima: "Klimaanlage", newkitchen: "Neue Küchenmöbel", units: "Möbellänge", appliances: "Einbaugeräte", showerNA: "Nicht möglich (gemauerte Dusche)" },
+    hu: { type: "Típus", size: "Méret", finish: "Kivitelezési szint", shower: "Zuhany / kád", layout: "Elrendezés", heat: "Padlófűtés", scope: "Munka jellege", baths: "Fürdőszobák", kitchen: "Konyha", condition: "Jelenlegi állapot", walls: "Falmozgatás", floor: "Padló jellege", windows: "Ablakcsere", heatsys: "Fűtés", klima: "Klíma", newkitchen: "Új konyhabútor", units: "Bútor hossza", appliances: "Beépített gépek" },
+    en: { type: "Type", size: "Size", finish: "Finish level", shower: "Shower / bath", layout: "Layout", heat: "Underfloor heating", scope: "Type of work", baths: "Bathrooms", kitchen: "Kitchen", condition: "Current condition", walls: "Wall changes", floor: "Floor type", windows: "Window replacement", heatsys: "Heating", klima: "Air conditioning", newkitchen: "New kitchen units", units: "Units length", appliances: "Built-in appliances" },
+    de: { type: "Typ", size: "Größe", finish: "Ausstattungsniveau", shower: "Dusche / Wanne", layout: "Anordnung", heat: "Fußbodenheizung", scope: "Art der Arbeiten", baths: "Bäder", kitchen: "Küche", condition: "Aktueller Zustand", walls: "Wandänderungen", floor: "Bodenart", windows: "Fenstertausch", heatsys: "Heizung", klima: "Klimaanlage", newkitchen: "Neue Küchenmöbel", units: "Möbellänge", appliances: "Einbaugeräte" },
 };
 function summaryPairs(sel, lang = "hu") {
     const L = normLang(lang);
@@ -1908,8 +1893,7 @@ function summaryPairs(sel, lang = "hu") {
     if (pt === "furdo") {
         p.push([K.shower, lbl("washing", sel.washing, L)]);
         p.push([K.layout, lbl("layout", sel.layout, L)]);
-        // Épített zuhanyzó alá nem kerül padlófűtés - ilyenkor ezt jelezzük, nem "-".
-        p.push([K.heat, sel.washing === "zuhany" ? K.showerNA : lbl("heating", sel.heating, L)]);
+        p.push([K.heat, lbl("heating", sel.heating, L)]);
     } else if (pt === "lakas" || pt === "haz") {
         const has = (k) => sel[k] != null && String(sel[k]).trim() !== "";
         p.push([K.scope, lbl("scope", sel.scope, L)]);
@@ -1970,9 +1954,9 @@ const QUOTE_STR = {
         // NM Bau alanyi adómentes: nincs rá ÁFA, tehát ez a fizetendő összeg.
         basisLabour: "(**ÁFA-mentes** ár - ez a **munkadíj**, az anyag nem tartalmazza)",
         basisTurnkey: "(**ÁFA-mentes** ár, **kulcsrakész**)",
-        inclFurdo: "bontás, víz- és csatornaszerelés, fűtés, villany, vízszigetelés, burkolás, festés, a szaniterek beépítése és a kiszállás - mindez **munkadíjban**",
+        inclFurdo: "bontás, víz- és csatornaszerelés, fűtés, vízszigetelés, kőműves munka, burkolás és a szaniterek beépítése - mindez **munkadíjban**",
         inclOther: "a fenti tételek - anyaggal és munkadíjjal, kulcsrakész kivitelben",
-        exclLabour: "**Mit nem tartalmaz?** Az **anyagot**: csempe, járólap, szaniterek (WC, mosdó, kád), csaptelepek, zuhanykabin vagy zuhanyfal. Ezeket Ön vásárolja meg - a kiválasztásban szívesen segítünk.",
+        exclLabour: "**Mit nem tartalmaz?** Az **anyagot**: csempe, járólap, szaniterek (WC, mosdó, kád), csaptelepek, zuhanytálca vagy üvegfal - ezeket Ön vásárolja meg, a kiválasztásban szívesen segítünk. A **festés-glettelést** és a **villanyszerelést** sem: ezeket alvállalkozó végzi, külön árajánlattal.",
         next: (incl, excl) => [
             `Ez egy **tájékoztató becslés** - a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott anyagok és a pontos műszaki tartalom függvényében.`,
             ``, `**Mit tartalmaz?** ${incl}.`, ...(excl ? [``, excl] : []), ``, `**Mi a következő lépés?**`,
@@ -1993,9 +1977,9 @@ const QUOTE_STR = {
         ].join("\n"),
         basisLabour: "(**VAT-free** price - this is the **labour**, materials not included)",
         basisTurnkey: "(**VAT-free** price, **turnkey**)",
-        inclFurdo: "demolition, plumbing and drainage, heating, electrics, waterproofing, tiling, painting, fitting the sanitaryware and the call-out - all as **labour**",
+        inclFurdo: "demolition, plumbing and drainage, heating, waterproofing, masonry, tiling and fitting the sanitaryware - all as **labour**",
         inclOther: "the items above - with materials and labour, in turnkey form",
-        exclLabour: "**What is not included?** The **materials**: tiles, sanitaryware (WC, basin, bath), taps and the shower enclosure or screen. You buy those yourself - we're glad to help you choose.",
+        exclLabour: "**What is not included?** The **materials**: tiles, sanitaryware (WC, basin, bath), taps and the shower tray or glass panel - you buy those yourself, and we're glad to help you choose. Nor **painting and skimming** or **electrical work**: a subcontractor carries those out and quotes them separately.",
         next: (incl, excl) => [
             `This is an **indicative estimate** - the final price is set after the **free on-site survey**, depending on the chosen materials and the exact technical scope.`,
             ``, `**What's included?** ${incl}.`, ...(excl ? [``, excl] : []), ``, `**What happens next?**`,
@@ -2016,9 +2000,9 @@ const QUOTE_STR = {
         ].join("\n"),
         basisLabour: "(Preis **ohne MwSt.** - dies ist der **Arbeitslohn**, ohne Material)",
         basisTurnkey: "(Preis **ohne MwSt.**, **schlüsselfertig**)",
-        inclFurdo: "Abbruch, Sanitär- und Abwasserinstallation, Heizung, Elektrik, Abdichtung, Fliesenarbeiten, Malerarbeiten, Montage der Sanitärobjekte und die Anfahrt - alles als **Arbeitsleistung**",
+        inclFurdo: "Abbruch, Sanitär- und Abwasserinstallation, Heizung, Abdichtung, Maurerarbeiten, Fliesenarbeiten und Montage der Sanitärobjekte - alles als **Arbeitsleistung**",
         inclOther: "die obigen Positionen - mit Material und Arbeit, schlüsselfertig",
-        exclLabour: "**Was ist nicht enthalten?** Das **Material**: Fliesen, Sanitärobjekte (WC, Waschbecken, Badewanne), Armaturen und die Duschabtrennung. Diese kaufen Sie selbst - bei der Auswahl beraten wir Sie gerne.",
+        exclLabour: "**Was ist nicht enthalten?** Das **Material**: Fliesen, Sanitärobjekte (WC, Waschbecken, Badewanne), Armaturen sowie Duschtasse und Glaswand - diese kaufen Sie selbst, bei der Auswahl beraten wir Sie gerne. Ebenso wenig **Maler- und Spachtelarbeiten** sowie die **Elektroinstallation**: diese führt ein Subunternehmer aus und rechnet sie separat ab.",
         next: (incl, excl) => [
             `Dies ist eine **Richtschätzung** - der endgültige Preis wird nach der **kostenlosen Vor-Ort-Besichtigung** festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.`,
             ``, `**Was ist enthalten?** ${incl}.`, ...(excl ? [``, excl] : []), ``, `**Wie geht es weiter?**`,
@@ -2113,9 +2097,9 @@ A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL
 === FÜRDŐSZOBA (furdo) ===
 1. size - "Körülbelül hány négyzetméteres a fürdőszoba?" (szám vagy gomb) → s_3_4|s_5_6|s_7_8|s_9_10|s_11p|<szám>|nem_tudom
 2. tier - "Milyen kivitelezési szintet szeretne?": • **Alap / takarékos** • **Közepes** • **Prémium** → basic|mid|premium|nem_tudom
-3. washing - "Zuhanyzót vagy kádat szeretne?": • **Épített zuhanyzó** (csempézett, üveg fallal) • **Zuhanykabin** (kész, komplett) • **Kád** • **Kád és zuhany** → zuhany|zuhanykabin|kad|mindketto|nem_tudom
+3. washing - "Zuhanyzót vagy kádat szeretne?": • **Műmárvány zuhanytálca** (alacsony peremű, üvegfallal) • **Zuhanykabin** (kész, komplett) • **Kád** • **Kád és zuhany** → zuhany|zuhanykabin|kad|mindketto|nem_tudom. FONTOS: épített (csempézett, falazott) zuhanyzót NEM készítünk - ezt soha ne ajánld.
 4. layout - "Marad a mostani elrendezés, vagy áthelyeznénk a vizes pontokat?": • **Marad** • **Áthelyezés** → marad|athelyez|nem_tudom
-5. heating - "Szeretne elektromos padlófűtést?" (csempe alá fektetett fűtőszőnyeg) → igen|nem|nem_tudom. FONTOS: **épített zuhanyzó** (washing=zuhany) esetén padlófűtés NEM lehetséges - ilyenkor ezt a kérdést NE tedd fel (a rendszer kihagyja).
+5. heating - "Szeretne elektromos padlófűtést?" (csempe alá fektetett fűtőszőnyeg) → igen|nem|nem_tudom. Ezt MINDEN zuhany/kád változatnál fel kell tenni.
 
 === KONYHA (konyha) ===
 1. size - "Körülbelül hány négyzetméteres a konyha?" (szám vagy gomb) → <szám>|nem_tudom
@@ -2180,7 +2164,7 @@ RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben - a felkínált összeg-s
 MINDIG maradjon üres string (""). Fogadd el a választ (a kihagyást is) és LÉPJ TOVÁBB - SOHA ne tedd
 fel újra ugyanazt a kérdést.
 
-MEGJEGYZÉS: A bontást, vízszigetelést, gépészetet, villanyszerelést, festést és a törmelékelszállítást NE kérdezd meg külön - ezek az ajánlatban benne vannak. FÜRDŐSZOBÁNÁL az árajánlat a MUNKADÍJ: az anyagot (csempe, járólap, szaniterek, csaptelepek, zuhanykabin) az ügyfél vásárolja meg, ez NINCS benne az árban. Ha az ügyfél az árról vagy arról kérdez, mi van benne, ezt mondd el őszintén. Az áraink ÁFA-mentesek (alanyi adómentesség), tehát a megadott összeg a maximálisan fizetendő - NE mondd, hogy "nettó" vagy hogy jön rá ÁFA. Külső (homlokzat, tető, kerítés, térkövezés) munkát NEM vállalunk - ezt NE kérdezd és NE ajánld.
+MEGJEGYZÉS: A bontást, vízszigetelést, gépészetet és a törmelékelszállítást NE kérdezd meg külön - ezek az ajánlatban benne vannak. A FESTÉST-GLETTELÉST és a VILLANYSZERELÉST alvállalkozó végzi, ezekre az ajánlat NEM ad árat - ha az ügyfél rákérdez, mondd el, hogy ezeket külön, alvállalkozói árajánlattal adjuk. FÜRDŐSZOBÁNÁL az árajánlat a MUNKADÍJ: az anyagot (csempe, járólap, szaniterek, csaptelepek, zuhanykabin) az ügyfél vásárolja meg, ez NINCS benne az árban. Ha az ügyfél az árról vagy arról kérdez, mi van benne, ezt mondd el őszintén. Az áraink ÁFA-mentesek (alanyi adómentesség), tehát a megadott összeg a maximálisan fizetendő - NE mondd, hogy "nettó" vagy hogy jön rá ÁFA. Külső (homlokzat, tető, kerítés, térkövezés) munkát NEM vállalunk - ezt NE kérdezd és NE ajánld.
 
 SZABÁLYOK
 - Az ügyfél írhat szabad szöveggel is - értelmezd a válaszát és rendeld hozzá a megfelelő értéket.
@@ -2229,6 +2213,117 @@ All money stays in Hungarian Forint (Ft). Never use emojis or em dashes; use a p
 
 // Short customer-facing system messages (validation re-asks, rate-limit, errors),
 // per language. The owner-facing logs/e-mail stay Hungarian regardless.
+// ---------------------------------------------------------------------------
+//  CONTACT FORM
+//  The tail of the conversation used to be four separate questions - name,
+//  location, e-mail, phone - each costing a model call and a round trip. By that
+//  point the customer is not being consulted any more, they are just filling in
+//  details, so we hand them one form and let them type it all at once. The quote
+//  lands immediately after, because budget (the only remaining field) rides
+//  along in the same form.
+// ---------------------------------------------------------------------------
+const FORM_STR = {
+    hu: {
+        intro: "Köszönöm, megvan minden a számításhoz! Már csak néhány adat, és mutatom a kalkulációt.",
+        title: "Elérhetőségek",
+        name: "Név", namePh: "Az Ön neve",
+        postal_code: "Helyszín", postalPh: "Irányítószám vagy település",
+        email: "E-mail", emailPh: "pelda@gmail.com",
+        phone: "Telefonszám", phonePh: "+36 20 123 4567",
+        budget: "Tervezett keret (nem kötelező)", budgetSkip: "Inkább nem mondanám",
+        submit: "Kérem a kalkulációt",
+        why: "Az adatait csak az ajánlat elküldéséhez és a felmérés egyeztetéséhez használjuk.",
+        required: "Kérem, töltse ki.",
+        nameShort: "Kérem, adja meg a teljes nevét.",
+        summary: "Elérhetőségek megadva",
+    },
+    en: {
+        intro: "Thank you, I have everything for the calculation! Just a few details and I'll show you the figures.",
+        title: "Your details",
+        name: "Name", namePh: "Your name",
+        postal_code: "Location", postalPh: "Postcode or town",
+        email: "E-mail", emailPh: "example@gmail.com",
+        phone: "Phone", phonePh: "+36 20 123 4567",
+        budget: "Planned budget (optional)", budgetSkip: "I'd rather not say",
+        submit: "Show me the calculation",
+        why: "We only use your details to send the quote and arrange the survey.",
+        required: "Please fill this in.",
+        nameShort: "Please give your full name.",
+        summary: "Details provided",
+    },
+    de: {
+        intro: "Vielen Dank, ich habe alles für die Berechnung! Nur noch ein paar Angaben und ich zeige Ihnen die Kalkulation.",
+        title: "Ihre Kontaktdaten",
+        name: "Name", namePh: "Ihr Name",
+        postal_code: "Ort", postalPh: "Postleitzahl oder Ort",
+        email: "E-Mail", emailPh: "beispiel@gmail.com",
+        phone: "Telefon", phonePh: "+43 660 1234567",
+        budget: "Geplantes Budget (optional)", budgetSkip: "Lieber nicht angeben",
+        submit: "Kalkulation anzeigen",
+        why: "Wir verwenden Ihre Daten nur für das Angebot und die Terminvereinbarung.",
+        required: "Bitte ausfüllen.",
+        nameShort: "Bitte geben Sie Ihren vollständigen Namen an.",
+        summary: "Kontaktdaten angegeben",
+    },
+};
+const formStr = (lang) => FORM_STR[normLang(lang)] || FORM_STR.hu;
+
+// The payload the widget renders as a form. Values already known (the customer
+// volunteered a town earlier, say) come back pre-filled so nothing is asked twice.
+function contactForm(sel, lang) {
+    const F = formStr(lang);
+    const val = (k) => (sel && sel[k] != null ? String(sel[k]) : "");
+    return {
+        title: F.title,
+        why: F.why,
+        submit: F.submit,
+        fields: [
+            { key: "name", label: F.name, placeholder: F.namePh, type: "text", autocomplete: "name", value: val("name") },
+            { key: "postal_code", label: F.postal_code, placeholder: F.postalPh, type: "text", autocomplete: "address-level2", value: val("postal_code") },
+            { key: "email", label: F.email, placeholder: F.emailPh, type: "email", autocomplete: "email", value: val("email") },
+            { key: "phone", label: F.phone, placeholder: F.phonePh, type: "tel", autocomplete: "tel", value: val("phone") },
+        ],
+        // Budget is the last field of the flow and it is optional, so it rides
+        // along here - that way the quote can render the moment the form is sent.
+        budget: { key: "budget", label: F.budget, options: budgetBandsFor(sel, lang).chips, value: val("budget") },
+    };
+}
+
+// Validate a whole submitted form at once. Returns { values } or { errors },
+// where errors is keyed by field so the widget can mark the offending input
+// rather than dumping one message into the chat.
+function validateContactForm(contact, lang) {
+    const F = formStr(lang);
+    const M = msg(lang);
+    const c = contact && typeof contact === "object" ? contact : {};
+    const errors = {};
+    const values = {};
+    const get = (k) => String(c[k] == null ? "" : c[k]).trim().slice(0, 200);
+
+    for (const k of ["name", "postal_code", "email", "phone"]) {
+        const v = get(k);
+        if (!v) { errors[k] = F.required; continue; }
+        values[k] = v;
+    }
+    if (values.name && values.name.length < 2) errors.name = F.nameShort;
+    if (values.postal_code && locationIssue(values.postal_code)) errors.postal_code = M.reaskPostal;
+    if (values.email) {
+        const i = emailIssue(values.email);
+        if (i === "gmail") errors.email = M.reaskEmailTypo;
+        else if (i) errors.email = M.reaskEmail;
+    }
+    if (values.phone && phoneIssue(values.phone)) errors.phone = M.reaskPhone;
+
+    // Budget is labelled optional on the form, so leaving it blank has to MEAN
+    // something - otherwise the field stays pending and the bot turns round and
+    // asks for it in a bubble, which is exactly the interrogation the form was
+    // meant to end. An empty select records the existing "rather not say" opt-out.
+    const b = get("budget");
+    values.budget = b || BUDGET_WORDS[normLang(lang)].skip;
+
+    return Object.keys(errors).length ? { errors } : { values };
+}
+
 const MSG = {
     hu: {
         reaskEmailTypo: "Hoppá, úgy tűnik **elírás** csúszott a címbe - a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét.",
@@ -2549,7 +2644,7 @@ export default async function handler(request, response) {
         // a rejected phone/e-mail bleeding into the NEXT field. ---
         {
             let reask = null;
-            if (typeof question === "string" && question.trim()) {
+            if (!(request.body && request.body.contact) && typeof question === "string" && question.trim()) {
                 const M = msg(lang);
                 if (askedField === "email") {
                     const i = emailIssue(question);
@@ -2577,7 +2672,28 @@ export default async function handler(request, response) {
         // Record this turn's answer into the field the customer was actually
         // being asked, then work out what to ask next.
         const determined = {};
-        if (askedField) {
+        // A submitted contact form carries several fields at once, so it skips
+        // the single-answer mapper entirely. On a bad value nothing is recorded:
+        // the form comes straight back with the offending inputs marked, which
+        // is the form equivalent of the one-field re-ask below.
+        const submitted = request.body && request.body.contact;
+        if (submitted) {
+            const res = validateContactForm(submitted, lang);
+            if (res.errors) {
+                return response.status(200).json({
+                    answer: "",
+                    chips: [],
+                    lang,
+                    form: contactForm(mergeState(baseSel, submitted), lang),
+                    formErrors: res.errors,
+                    state: baseSel,
+                    estimate: runningEstimate(baseSel, lang),
+                    progress: progressFields(baseSel).filter((f) => baseSel[f] != null && String(baseSel[f]).trim() !== "").length,
+                    progressTotal: progressFields(baseSel).length,
+                });
+            }
+            Object.assign(determined, res.values);
+        } else if (askedField) {
             const v = mapAnswer(askedField, question, baseSel);
             if (v) determined[askedField] = v;
         }
@@ -2593,6 +2709,25 @@ export default async function handler(request, response) {
             return await finishQuote(preSel, history, lang, response);
         }
 
+        // --- CONTACT FORM, also decided before the model call ---
+        // Everything the price depends on has been answered; what is left is
+        // admin. Rather than spend four more model calls asking for a name, a
+        // town, an e-mail and a phone number one at a time, hand over a form.
+        // Deterministic, so it costs nothing and cannot be phrased away.
+        if (CONTACT_FIELDS.includes(nextField)) {
+            const F = formStr(lang);
+            return response.status(200).json({
+                answer: F.intro,
+                chips: [],
+                lang,
+                form: contactForm(preSel, lang),
+                state: preSel,
+                estimate: runningEstimate(preSel, lang),
+                progress: progressFields(preSel).filter((f) => preSel[f] != null && String(preSel[f]).trim() !== "").length,
+                progressTotal: progressFields(preSel).length,
+            });
+        }
+
         // Normalized message list for the model (system prompt in the customer's
         // language, plus the one question it is allowed to ask this turn).
         // Language rule LAST: it has to outrank the Hungarian flow text and the
@@ -2606,6 +2741,14 @@ export default async function handler(request, response) {
             }
         } else if (question) {
             messages.push({ role: "user", content: question });
+        }
+        // A submitted contact form carries no `question`, so on a short history
+        // the model would receive a system prompt and no user turn at all -
+        // which the providers reject outright. Give it the submission as the
+        // user's turn, exactly as the widget shows it in the transcript.
+        if (messages.length === 1) {
+            const said = CONTACT_FIELDS.map((k) => determined[k]).filter(Boolean).join(" · ");
+            messages.push({ role: "user", content: said || String(question || "") || "?" });
         }
 
 
