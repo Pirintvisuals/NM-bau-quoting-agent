@@ -1,5 +1,8 @@
 {
   "name": "mimosa-faq-agent",
   "version": "1.0.0",
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@vercel/functions": "^3.9.7"
+  }
 }

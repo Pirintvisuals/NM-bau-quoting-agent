@@ -55,6 +55,7 @@
 //  below overlaps the price list, it has been reset to the price list's value.
 // ---------------------------------------------------------------------------
 import { PRICE_LIST, rate, FT_PER_EUR_FALLBACK } from "./pricelist.js";
+import { waitUntil } from "@vercel/functions";
 
 // The old bathroom model's constants lived here - per-m² averages for tiling,
 // plumbing, sanitaryware and so on. Every one of them was replaced on
@@ -2706,7 +2707,7 @@ export default async function handler(request, response) {
         // an answer we throw away - and give it one more chance to say something
         // that contradicts the quote.
         if (!nextField && isQuoteReady(preSel)) {
-            return await finishQuote(preSel, history, lang, response);
+            return await finishQuote(preSel, history, lang, response, (request.body || {}).sessionId);
         }
 
         // --- CONTACT FORM, also decided before the model call ---
@@ -2790,7 +2791,7 @@ export default async function handler(request, response) {
         // Normally the check above catches this before the model call; this is the
         // case where the model's own DATA block completed the last missing field.
         if (isQuoteReady(sel)) {
-            return await finishQuote(sel, history, lang, response);
+            return await finishQuote(sel, history, lang, response, (request.body || {}).sessionId);
         }
 
         aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
@@ -2804,11 +2805,144 @@ export default async function handler(request, response) {
 }
 
 // ---------------------------------------------------------------------------
+//  ZOHO FLOW WEBHOOK
+//  Fires once, from the server, the moment a quote is finished - the only point
+//  where the contact details and the priced quote both exist.
+//
+//  The URL lives in ZOHO_FLOW_WEBHOOK_URL and is read here, in the API route.
+//  It must never reach the browser: a Zoho Flow URL carries its own token in
+//  the path, so anyone holding it can inject leads into the CRM. Nothing in
+//  public/ references it, and the widget never sees it.
+//
+//  Failure is deliberately silent for the customer. Their quote is already
+//  computed; a CRM that is down, slow or misconfigured must not turn that into
+//  an error on screen. It is logged for the owner instead. The request is also
+//  capped by a timeout, because on a serverless function an un-timed fetch to a
+//  hanging endpoint holds the customer's reply hostage until the platform kills
+//  the whole invocation.
+// ---------------------------------------------------------------------------
+const WEBHOOK_TIMEOUT_MS = 5000;
+// sendQuoteEmail has its own oneLine(), but it is scoped inside that function.
+const webhookLine = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
+
+// Is Vercel's per-request context actually present, with a waitUntil on it?
+// @vercel/functions' waitUntil reads exactly this symbol, but does not export
+// the lookup - and when the context is missing it does nothing at all, without
+// an error. Checking first is the only way to tell "handed to the platform"
+// apart from "silently dropped".
+function hasVercelWaitUntil() {
+    try {
+        const ctx = globalThis[Symbol.for("@vercel/request-context")]?.get?.();
+        return typeof ctx?.waitUntil === "function";
+    } catch (e) {
+        return false;
+    }
+}
+
+async function sendLeadWebhook(sel, quote, lang, meta = {}) {
+    const url = (process.env.ZOHO_FLOW_WEBHOOK_URL || "").trim();
+    if (!url) return { ok: false, skipped: "ZOHO_FLOW_WEBHOOK_URL nincs beállítva" };
+    // The shipped .env.local placeholder, still unedited. Say so by name rather
+    // than complaining that it is not an https URL, which sends you looking for
+    // the wrong problem.
+    if (url === "paste-your-real-url-here") {
+        console.warn("Zoho webhook kihagyva: a ZOHO_FLOW_WEBHOOK_URL meg a helykitolto ertek. Ird be a valodi URL-t (.env.local helyben, Vercel Environment Variables elesben).");
+        return { ok: false, skipped: "placeholder" };
+    }
+    // https only, so the lead's contact details are never posted in the clear.
+    // localhost is the one exception: it is how you test the payload against a
+    // local catcher before pointing it at the real Flow endpoint.
+    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url);
+    if (!/^https:\/\//i.test(url) && !isLocal) {
+        console.warn("Zoho webhook kihagyva: a ZOHO_FLOW_WEBHOOK_URL nem https URL.");
+        return { ok: false, error: "insecure_url" };
+    }
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), WEBHOOK_TIMEOUT_MS);
+    try {
+        const cur = quote.currency || "huf";
+        const payload = {
+            // Lead channel, mapped onto Bigin's "Lehetséges ügyfél forrása" field.
+            // The website contact form posts to the same Zoho Flow webhook with
+            // source "website form", so the two channels stay distinguishable.
+            source: "Chatbot",
+            submitted_at: new Date().toISOString(),
+            session_id: webhookLine(meta.sessionId) || null,
+            language: normLang(lang),
+
+            name: webhookLine(sel.name) || null,
+            phone: webhookLine(sel.phone) || null,
+            email: webhookLine(sel.email) || null,
+
+            // What the customer actually gave us. It is a postcode, a town or a
+            // region - NOT a street address; the flow never asks for one. Kept under
+            // the key Zoho expects, with the precision stated so nobody downstream
+            // mistakes "Miskolc" for a delivery address.
+            address: webhookLine(sel.postal_code) || null,
+            address_precision: "city_or_postcode",
+
+            job_type: FLOW_LABEL[sel.projectType] || sel.projectType || null,
+            // One readable line for a CRM note, built from the same recap the
+            // customer saw, so the two can never disagree.
+            // Key must be exactly "job": the Zoho Flow automation maps this name.
+            job: summaryPairs(sel, "hu").map(([k, v]) => `${k}: ${v}`).join(" · "),
+            job_details: {
+                projectType: sel.projectType || null,
+                size: sel.size || null,
+                tier: sel.tier || null,
+                washing: sel.washing || null,
+                layout: sel.layout || null,
+                heating: sel.heating || null,
+                scope: sel.scope || null,
+                bathrooms: sel.bathrooms || null,
+                kitchen: sel.kitchen || null,
+                timeline: sel.timeline || null,
+                budget: webhookLine(sel.budget) || null,
+            },
+
+            quote_currency: cur === "eur" ? "EUR" : "HUF",
+            quote_low: quote.low,
+            quote_high: quote.high,
+            quote_total: quote.total,
+            // "labour" = munkadíj only, materials excluded. Anything reading the
+            // amount needs this to know what it covers.
+            quote_basis: quote.basis || null,
+            quote_vat: "exempt",
+            quote_formatted: `${formatMoney(quote.low, cur)} - ${formatMoney(quote.high, cur)}`,
+            quote_items: quote.items.map((i) => ({ label: i.label, low: i.low, high: i.high })),
+        };
+
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: ac.signal,
+        });
+        if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            console.error(`Zoho webhook HTTP ${res.status}: ${body.slice(0, 300)}`);
+            return { ok: false, status: res.status };
+        }
+        console.log("Zoho webhook elkuldve.");
+        return { ok: true };
+    } catch (err) {
+        const why = err && err.name === "AbortError"
+            ? `nem valaszolt ${WEBHOOK_TIMEOUT_MS} ms alatt`
+            : (err && err.message) || String(err);
+        console.error("Zoho webhook sikertelen:", why);
+        return { ok: false, error: why };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// ---------------------------------------------------------------------------
 //  Deliver the finished quote: log it, e-mail the owner (with the full
 //  transcript), and return the customer-facing bubbles. Shared by both
 //  completion paths so they can never drift apart.
 // ---------------------------------------------------------------------------
-async function finishQuote(sel, history, lang, response) {
+async function finishQuote(sel, history, lang, response, sessionId) {
     const quote = buildQuote(sel, { currency: currencyFor(lang) });
     const fm = (n) => formatMoney(n, quote.currency);
     const progFields = progressFields(sel);
@@ -2832,6 +2966,24 @@ async function finishQuote(sel, history, lang, response) {
             { role: "assistant", content: customerAnswer },
         ],
     });
+
+    // The lead is complete here: contact details, the job, and the priced quote.
+    // Push it to the CRM - in the BACKGROUND. The webhook is bookkeeping; the
+    // quote is what the customer is waiting for, so a slow Zoho must not add up
+    // to 5 s to their reply. waitUntil lets the response go out now while Vercel
+    // keeps the function alive until the POST settles.
+    const leadDelivery = sendLeadWebhook(sel, quote, lang, { sessionId }).catch(() => {});
+    if (hasVercelWaitUntil()) {
+        waitUntil(leadDelivery);
+    } else if (process.env.VERCEL) {
+        // On Vercel but without a request context, waitUntil would be a silent
+        // no-op and the platform could freeze the function mid-request - losing
+        // the lead. Pay the latency instead of the lead.
+        console.warn("waitUntil nem elerheto - a Zoho webhookot kivarjuk.");
+        await leadDelivery;
+    }
+    // Locally (node server.js) the process is long-lived, so the unawaited
+    // promise simply finishes on its own.
 
     return response.status(200).json({
         answer: customerAnswer,

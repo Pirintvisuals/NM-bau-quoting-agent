@@ -8,23 +8,34 @@ import statsHandler from './api/stats.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Manually load .env file
-try {
-    const envFile = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
-    envFile.split('\n').forEach(line => {
+// Manually load the .env files, in dotenv's usual precedence: a real environment
+// variable beats .env.local, which beats .env. Only this local dev server reads
+// them - on Vercel the values come from the project's own Environment
+// Variables, and neither file is deployed.
+function loadEnvFile(name) {
+    let contents;
+    try {
+        contents = fs.readFileSync(path.join(__dirname, name), 'utf8');
+    } catch (error) {
+        return false; // absent is normal - .env.local only exists on some machines
+    }
+    contents.split('\n').forEach(line => {
         const eq = line.indexOf('=');
         if (eq < 1 || line.trim().startsWith('#')) return;
         const key = line.slice(0, eq).trim();
         const value = line.slice(eq + 1).trim(); // keep '=' inside API keys intact
-        // A real environment variable wins over the .env file (standard dotenv
-        // behaviour) - lets you run e.g. RESEND_API_KEY=... node server.js to
-        // test without touching the file.
+        // First writer wins, so the call order below is what sets precedence.
         if (key && value && process.env[key] === undefined) {
             process.env[key] = value;
         }
     });
-} catch (error) {
-    console.log('No .env file found or error reading it');
+    return true;
+}
+
+const loadedLocalEnv = loadEnvFile('.env.local');
+const loadedEnv = loadEnvFile('.env');
+if (!loadedLocalEnv && !loadedEnv) {
+    console.log('No .env or .env.local file found');
 }
 
 const PORT = process.env.PORT || 8888;
