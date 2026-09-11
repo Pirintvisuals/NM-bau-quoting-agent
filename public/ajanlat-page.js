@@ -2,7 +2,10 @@
 //
 // The link is built server-side in finishQuote() (api/faq-agent.js). The
 // summary travels in the URL itself as base64url-encoded UTF-8 JSON - the
-// project has no database, so nothing is stored anywhere.
+// project has no database, so nothing is stored anywhere. Current links carry a
+// compact array of tokens and numbers (so the URL fits a 255-character CRM
+// field), turned back into labels here; the first, longer object format is
+// still accepted.
 //
 // Everything decoded here came from a URL anyone can edit, so it is treated as
 // untrusted: strictly validated, capped in length, and written with
@@ -16,6 +19,11 @@
 
   var PHONE = "+36 20 254 6624";
   var MAX_PARAM = 2048;
+
+  // Same labels as the chat recap (LABELS / I18N_LABELS / sizeLabel in
+  // api/faq-agent.js) - keep them in step.
+  var SIZE_BANDS = { s_3_4: "3–4 m²", s_5_6: "5–6 m²", s_7_8: "7–8 m²", s_9_10: "9–10 m²" };
+  var DEFAULT_AREA = { furdo: 5, lakas: 60, haz: 110, konyha: 9, szoba: 15 };
 
   var T = {
     hu: {
@@ -31,7 +39,12 @@
       call: "Kérdése van? Hívjon minket:",
       nfTitle: "Ez az árajánlat nem található",
       nfBody: "A link hiányos vagy sérült. Kérjen új előzetes árajánlatot a weboldalunkon, vagy hívjon minket.",
-      locale: "hu-HU"
+      locale: "hu-HU",
+      jobs: { furdo: "Fürdőszoba", konyha: "Konyha", lakas: "Teljes lakás", haz: "Családi ház", szoba: "Egy szoba" },
+      tiers: { basic: "Alap / takarékos", mid: "Közepes", premium: "Prémium", nem_tudom: "Nem tudja (alap: közepes)" },
+      over10: "10 m² felett",
+      sizeUnknown: function (a) { return "Nem tudja (alap: " + a + " m²)"; },
+      decimal: ","
     },
     en: {
       title: "Preliminary estimate",
@@ -46,7 +59,12 @@
       call: "Questions? Call us:",
       nfTitle: "This estimate could not be found",
       nfBody: "The link is incomplete or damaged. Request a new estimate on our website, or give us a call.",
-      locale: "en-GB"
+      locale: "en-GB",
+      jobs: { furdo: "Bathroom", konyha: "Kitchen", lakas: "Whole flat", haz: "Family house", szoba: "A single room" },
+      tiers: { basic: "Basic / budget", mid: "Mid-range", premium: "Premium", nem_tudom: "Not sure (default: mid-range)" },
+      over10: "over 10 m²",
+      sizeUnknown: function (a) { return "Not sure (default: " + a + " m²)"; },
+      decimal: "."
     },
     de: {
       title: "Vorläufiges Angebot",
@@ -61,9 +79,18 @@
       call: "Fragen? Rufen Sie uns an:",
       nfTitle: "Dieses Angebot wurde nicht gefunden",
       nfBody: "Der Link ist unvollständig oder beschädigt. Fordern Sie auf unserer Website ein neues Angebot an oder rufen Sie uns an.",
-      locale: "de-AT"
+      locale: "de-AT",
+      jobs: { furdo: "Badezimmer", konyha: "Küche", lakas: "Ganze Wohnung", haz: "Einfamilienhaus", szoba: "Ein Zimmer" },
+      tiers: { basic: "Einfach / sparsam", mid: "Mittel", premium: "Premium", nem_tudom: "Weiß nicht (Standard: Mittel)" },
+      over10: "über 10 m²",
+      sizeUnknown: function (a) { return "Weiß nicht (Standard: " + a + " m²)"; },
+      decimal: ","
     }
   };
+
+  function has(o, k) {
+    return typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k);
+  }
 
   function pickLang(l) {
     l = String(l || "").toLowerCase().slice(0, 2);
@@ -89,6 +116,54 @@
       isText(o.quote_formatted, 80);
   }
 
+  function isAmount(n) {
+    return typeof n === "number" && isFinite(n) && n >= 0 && n <= 1e10 && Math.floor(n) === n;
+  }
+
+  function money(n, cur) {
+    try {
+      return cur === "eur" ? n.toLocaleString("de-AT") + " EUR" : n.toLocaleString("hu-HU") + " Ft";
+    } catch (e) {
+      return String(n) + (cur === "eur" ? " EUR" : " Ft");
+    }
+  }
+
+  function sizeText(size, pt, t) {
+    if (size === "nem_tudom") return t.sizeUnknown(DEFAULT_AREA[pt]);
+    if (size === "s_11p") return t.over10;
+    if (has(SIZE_BANDS, size)) return SIZE_BANDS[size];
+    if (typeof size === "number" && isFinite(size) && size >= 1 && size <= 1000) {
+      return String(size).replace(".", t.decimal) + " m²";
+    }
+    return null;
+  }
+
+  // Version 2: [2, lang, projectType, size, tier, low, high, currency, basis, date]
+  // -> the same summary object the first link format carried, or null.
+  function fromCompact(a) {
+    if (a.length !== 10 || a[0] !== 2) return null;
+    var lang = a[1], pt = a[2], size = a[3], tier = a[4], low = a[5], high = a[6];
+    var cur = a[7], basis = a[8], date = a[9];
+    if (lang !== "hu" && lang !== "en" && lang !== "de") return null;
+    var t = T[lang];
+    if (!has(t.jobs, pt)) return null;
+    if (tier !== "" && !has(t.tiers, tier)) return null;
+    if (!isAmount(low) || !isAmount(high) || low > high) return null;
+    if (cur !== "huf" && cur !== "eur") return null;
+    if (basis !== "l" && basis !== "t" && basis !== "") return null;
+    var s = sizeText(size, pt, t);
+    if (!s) return null;
+    return {
+      lang: lang,
+      job_type: t.jobs[pt],
+      size: s,
+      tier: tier === "" ? "-" : t.tiers[tier],
+      quote_formatted: money(low, cur) + " – " + money(high, cur),
+      submitted_at: typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+      basis: basis === "l" ? "labour" : basis === "t" ? "turnkey" : null
+    };
+  }
+
   // base64url -> bytes -> strict UTF-8 -> JSON -> validated object, or null.
   function decode(param) {
     if (!param || param.length > MAX_PARAM || !/^[A-Za-z0-9_-]+$/.test(param)) return null;
@@ -100,6 +175,7 @@
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       var json = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       var o = JSON.parse(json);
+      if (Array.isArray(o)) o = fromCompact(o);
       return isValid(o) ? o : null;
     } catch (e) {
       return null;
@@ -117,8 +193,11 @@
     if (typeof iso !== "string") return null;
     var d = new Date(iso);
     if (isNaN(d.getTime())) return null;
+    var opts = { year: "numeric", month: "long", day: "numeric" };
+    // A bare date parses as UTC midnight; show it as that day everywhere.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) opts.timeZone = "UTC";
     try {
-      return d.toLocaleDateString(t.locale, { year: "numeric", month: "long", day: "numeric" });
+      return d.toLocaleDateString(t.locale, opts);
     } catch (e) {
       return null;
     }

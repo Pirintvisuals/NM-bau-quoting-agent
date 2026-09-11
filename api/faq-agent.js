@@ -860,7 +860,7 @@ function buildBathroom(sel, cur = "huf") {
 }
 
 // Exported for unit testing the pricing math (no effect in production).
-export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget };
+export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget, buildQuoteLink };
 
 // ---------------------------------------------------------------------------
 //  FLOW CONFIG - every project type asks its OWN question set. The backend drives
@@ -2953,12 +2953,11 @@ async function sendLeadWebhook(sel, quote, lang, meta = {}) {
 //  There is no database in this project, so nothing is stored - the summary
 //  travels in the URL itself as base64url-encoded UTF-8 JSON, and
 //  public/ajanlat-page.js decodes it in the browser. Deliberately small: job
-//  type, size, tier, the formatted range, the date, plus the language (so the
-//  page speaks the customer's language) and the basis (a labour-only range
-//  shown without saying so would mislead, exactly as "nettó" did). No
-//  quote_items - a long itemised URL breaks in some e-mail and chat clients -
-//  and no name, phone or e-mail, so the link is safe to forward or paste into
-//  a CRM.
+//  type, size, tier, the range, the date, plus the language (so the page
+//  speaks the customer's language) and the basis (a labour-only range shown
+//  without saying so would mislead, exactly as "nettó" did). No quote_items -
+//  a long itemised URL breaks in some e-mail and chat clients - and no name,
+//  phone or e-mail, so the link is safe to forward or store in the CRM.
 //
 //  NOT tamper-proof: anyone can edit the parameter and render a different
 //  price on an NM Bau-branded page. The page says it is an indicative estimate,
@@ -2984,20 +2983,33 @@ function requestHost(request) {
     return hd["x-forwarded-host"] || hd.host || "";
 }
 
+// Compact on purpose: the link is stored in a Bigin URL field, which holds at
+// most 255 characters, and the full text labels made it ~290-335. So the
+// summary carries the stable tokens and plain numbers, and ajanlat-page.js turns
+// them back into the labels. A JSON array, version 2:
+//   [2, lang, projectType, size, tier, low, high, currency, basis, date]
+// size is a band token (s_3_4 ...), "nem_tudom" or the m² number; tier may be
+// ""; basis is "l" (labour), "t" (turnkey) or ""; date is YYYY-MM-DD.
+// test-quote-link.mjs keeps every flow and language under the 255 limit.
 function buildQuoteLink(sel, quote, lang, host) {
     const base = quoteLinkBase(host);
     if (!base) return null;
-    const L = normLang(lang);
-    const pt = sel.projectType || "furdo";
-    const summary = {
-        job_type: lbl("projectType", pt, L),
-        size: sizeLabel(sel.size, pt, L),
-        tier: lbl("tier", sel.tier, L),
-        quote_formatted: `${formatMoney(quote.low, quote.currency)} – ${formatMoney(quote.high, quote.currency)}`,
-        submitted_at: new Date().toISOString(),
-        lang: L,
-        basis: quote.basis || null,
-    };
+    const raw = sel.size == null ? "" : String(sel.size).trim();
+    const size = raw === "" || raw === "nem_tudom" ? "nem_tudom"
+        : Object.prototype.hasOwnProperty.call(SIZE_LABEL, raw) ? raw
+        : parseArea(raw) ?? "nem_tudom";
+    const summary = [
+        2,
+        normLang(lang),
+        sel.projectType || "furdo",
+        size,
+        sel.tier || "",
+        Math.round(quote.low),
+        Math.round(quote.high),
+        quote.currency === "eur" ? "eur" : "huf",
+        quote.basis === "labour" ? "l" : quote.basis === "turnkey" ? "t" : "",
+        new Date().toISOString().slice(0, 10),
+    ];
     const d = Buffer.from(JSON.stringify(summary), "utf8").toString("base64url");
     return `${base}/ajanlat?d=${d}`;
 }
