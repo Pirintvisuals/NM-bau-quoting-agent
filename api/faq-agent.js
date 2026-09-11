@@ -1966,6 +1966,7 @@ const QUOTE_STR = {
             `• Utána megkapja a **végleges, tételes ajánlatot**.`,
         ].join("\n"),
         recapTitle: "**Az Ön igénye röviden:**",
+        revisit: (url) => `Az előzetes árajánlatát később is megnézheti: [megnyitás](${url})`,
         urgent: (phone) => `Sürgős esetben hívjon: ${phone}`,
         emailQ: "Szeretné, hogy e-mailben is elküldjük az ajánlatot?",
     },
@@ -1989,6 +1990,7 @@ const QUOTE_STR = {
             `• Then you'll receive the **final, itemised offer**.`,
         ].join("\n"),
         recapTitle: "**Your request in brief:**",
+        revisit: (url) => `You can revisit your estimate at any time: [open](${url})`,
         urgent: (phone) => `In urgent cases, call us: ${phone}`,
         emailQ: "Would you like us to e-mail you the offer as well?",
     },
@@ -2012,11 +2014,12 @@ const QUOTE_STR = {
             `• Anschließend erhalten Sie das **endgültige, detaillierte Angebot**.`,
         ].join("\n"),
         recapTitle: "**Ihre Anfrage in Kürze:**",
+        revisit: (url) => `Ihr vorläufiges Angebot können Sie jederzeit erneut ansehen: [öffnen](${url})`,
         urgent: (phone) => `In dringenden Fällen rufen Sie uns an: ${phone}`,
         emailQ: "Möchten Sie das Angebot auch per E-Mail erhalten?",
     },
 };
-function renderCustomerQuote(quote, sel, lang = "hu") {
+function renderCustomerQuote(quote, sel, lang = "hu", opts = {}) {
     const L = normLang(lang);
     const S = QUOTE_STR[L] || QUOTE_STR.hu;
     const pt = sel.projectType || "furdo";
@@ -2042,6 +2045,10 @@ function renderCustomerQuote(quote, sel, lang = "hu") {
     const recap = [S.recapTitle];
     for (const [k, v] of summaryPairs(sel, L)) recap.push(`• ${k}: **${v}**`);
     recap.push(``);
+    if (opts.quoteLink) {
+        recap.push(S.revisit(opts.quoteLink));
+        recap.push(``);
+    }
     recap.push(S.urgent(PHONE));
     if (EMAIL_OFFER_ENABLED) { recap.push(``); recap.push(S.emailQ); }
 
@@ -2707,7 +2714,7 @@ export default async function handler(request, response) {
         // an answer we throw away - and give it one more chance to say something
         // that contradicts the quote.
         if (!nextField && isQuoteReady(preSel)) {
-            return await finishQuote(preSel, history, lang, response, (request.body || {}).sessionId);
+            return await finishQuote(preSel, history, lang, response, { sessionId: (request.body || {}).sessionId, host: requestHost(request) });
         }
 
         // --- CONTACT FORM, also decided before the model call ---
@@ -2791,7 +2798,7 @@ export default async function handler(request, response) {
         // Normally the check above catches this before the model call; this is the
         // case where the model's own DATA block completed the last missing field.
         if (isQuoteReady(sel)) {
-            return await finishQuote(sel, history, lang, response, (request.body || {}).sessionId);
+            return await finishQuote(sel, history, lang, response, { sessionId: (request.body || {}).sessionId, host: requestHost(request) });
         }
 
         aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
@@ -2910,6 +2917,8 @@ async function sendLeadWebhook(sel, quote, lang, meta = {}) {
             quote_basis: quote.basis || null,
             quote_vat: "exempt",
             quote_formatted: `${formatMoney(quote.low, cur)} - ${formatMoney(quote.high, cur)}`,
+            // Read-only summary page for this estimate (see buildQuoteLink).
+            quote_link: meta.quoteLink || null,
             quote_items: quote.items.map((i) => ({ label: i.label, low: i.low, high: i.high })),
         };
 
@@ -2938,11 +2947,67 @@ async function sendLeadWebhook(sel, quote, lang, meta = {}) {
 }
 
 // ---------------------------------------------------------------------------
+//  QUOTE LINK
+//  A shareable, read-only URL for the finished estimate: /ajanlat?d=<summary>.
+//
+//  There is no database in this project, so nothing is stored - the summary
+//  travels in the URL itself as base64url-encoded UTF-8 JSON, and
+//  public/ajanlat-page.js decodes it in the browser. Deliberately small: job
+//  type, size, tier, the formatted range, the date, plus the language (so the
+//  page speaks the customer's language) and the basis (a labour-only range
+//  shown without saying so would mislead, exactly as "nettó" did). No
+//  quote_items - a long itemised URL breaks in some e-mail and chat clients -
+//  and no name, phone or e-mail, so the link is safe to forward or paste into
+//  a CRM.
+//
+//  NOT tamper-proof: anyone can edit the parameter and render a different
+//  price on an NM Bau-branded page. The page says it is an indicative estimate,
+//  and the real figures stay in the owner e-mail and in Zoho, but if forged
+//  links ever become a concern, sign the summary with an HMAC secret.
+// ---------------------------------------------------------------------------
+
+// Where the link points. QUOTE_LINK_BASE_URL wins when set (e.g. a custom
+// domain); otherwise the host this request arrived on, which on Vercel is the
+// project's own domain - the one that serves /ajanlat. Anything that does not
+// look like a plain hostname is refused rather than pasted into a URL.
+function quoteLinkBase(host) {
+    const explicit = (process.env.QUOTE_LINK_BASE_URL || "").trim().replace(/\/+$/, "");
+    if (/^https?:\/\/[^\s/]+$/i.test(explicit)) return explicit;
+    const h = String(host || "").split(",")[0].trim();
+    if (!/^[a-z0-9.-]+(:\d{1,5})?$/i.test(h)) return null;
+    const local = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(h);
+    return `${local ? "http" : "https"}://${h}`;
+}
+
+function requestHost(request) {
+    const hd = (request && request.headers) || {};
+    return hd["x-forwarded-host"] || hd.host || "";
+}
+
+function buildQuoteLink(sel, quote, lang, host) {
+    const base = quoteLinkBase(host);
+    if (!base) return null;
+    const L = normLang(lang);
+    const pt = sel.projectType || "furdo";
+    const summary = {
+        job_type: lbl("projectType", pt, L),
+        size: sizeLabel(sel.size, pt, L),
+        tier: lbl("tier", sel.tier, L),
+        quote_formatted: `${formatMoney(quote.low, quote.currency)} – ${formatMoney(quote.high, quote.currency)}`,
+        submitted_at: new Date().toISOString(),
+        lang: L,
+        basis: quote.basis || null,
+    };
+    const d = Buffer.from(JSON.stringify(summary), "utf8").toString("base64url");
+    return `${base}/ajanlat?d=${d}`;
+}
+
+// ---------------------------------------------------------------------------
 //  Deliver the finished quote: log it, e-mail the owner (with the full
 //  transcript), and return the customer-facing bubbles. Shared by both
 //  completion paths so they can never drift apart.
 // ---------------------------------------------------------------------------
-async function finishQuote(sel, history, lang, response, sessionId) {
+async function finishQuote(sel, history, lang, response, meta = {}) {
     const quote = buildQuote(sel, { currency: currencyFor(lang) });
     const fm = (n) => formatMoney(n, quote.currency);
     const progFields = progressFields(sel);
@@ -2957,7 +3022,10 @@ async function finishQuote(sel, history, lang, response, sessionId) {
     // The quote bubbles the customer is about to see are the last turn of the
     // conversation, so append them - otherwise the owner's transcript stops one
     // message short and never shows the price that was quoted.
-    const customerAnswer = renderCustomerQuote(quote, sel, lang);
+    // A link the customer can reopen later, and the CRM can store. Built once,
+    // so the chat and the webhook always carry the identical URL.
+    const quoteLink = buildQuoteLink(sel, quote, lang, meta.host);
+    const customerAnswer = renderCustomerQuote(quote, sel, lang, { quoteLink });
     await sendQuoteEmail(sel, quote, {
         to: process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com",
         toCustomer: false,
@@ -2972,7 +3040,7 @@ async function finishQuote(sel, history, lang, response, sessionId) {
     // quote is what the customer is waiting for, so a slow Zoho must not add up
     // to 5 s to their reply. waitUntil lets the response go out now while Vercel
     // keeps the function alive until the POST settles.
-    const leadDelivery = sendLeadWebhook(sel, quote, lang, { sessionId }).catch(() => {});
+    const leadDelivery = sendLeadWebhook(sel, quote, lang, { sessionId: meta.sessionId, quoteLink }).catch(() => {});
     if (hasVercelWaitUntil()) {
         waitUntil(leadDelivery);
     } else if (process.env.VERCEL) {

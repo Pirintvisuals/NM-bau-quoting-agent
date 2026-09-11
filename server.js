@@ -158,6 +158,25 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Read-only quote summary page: /ajanlat?d=<summary>. The page is static; the
+    // ?d= parameter is decoded in the browser by public/ajanlat-page.js, so this
+    // route only has to map the clean URL onto the HTML file.
+    if (req.method === 'GET' && /^\/ajanlat\/?(\?|$)/.test(req.url || '')) {
+        fs.readFile(path.join(__dirname, 'public', 'ajanlat.html'), (error, content) => {
+            if (error) {
+                res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end('<h1>500</h1>');
+                return;
+            }
+            res.writeHead(200, {
+                'Content-Type': 'text/html; charset=utf-8',
+                'X-Robots-Tag': 'noindex, nofollow',
+            });
+            res.end(content);
+        });
+        return;
+    }
+
     // Serve static files from public directory. Confine to publicDir so a crafted
     // path like /../server.js can't escape and read files outside public/.
     const publicDir = path.join(__dirname, 'public');

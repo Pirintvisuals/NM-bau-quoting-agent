@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- A customer's estimate is not something search engines should index. -->
+  <meta name="robots" content="noindex, nofollow" />
+  <title>NM Bau - Előzetes árajánlat</title>
+  <link rel="icon" href="/logo.png" type="image/png" />
+  <style>
+    :root {
+      --ink: #1C1917;
+      --muted: #57534E;
+      --soft: #78716C;
+      --line: #EDEBE7;
+      --ground: #FAFAF7;
+      --gold: #B8860B;
+      --gold-dark: #6B4A00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+      background: var(--ground);
+      color: var(--ink);
+      line-height: 1.5;
+    }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 40px 20px 56px; }
+
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .brand img { width: 48px; height: 48px; object-fit: contain; }
+    .brand-name { font-size: 20px; font-weight: 700; letter-spacing: 0.2px; }
+    .accent { color: var(--gold); }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 1px 3px rgba(28, 25, 23, 0.06), 0 8px 24px rgba(28, 25, 23, 0.05);
+    }
+    .title { font-size: 24px; line-height: 1.25; margin: 0 0 4px; }
+    .muted { color: var(--muted); margin: 0; font-size: 14px; }
+
+    .facts { margin: 22px 0 0; padding: 0; }
+    .fact {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .fact:last-child { border-bottom: none; }
+    .fact dt { color: var(--muted); font-size: 14px; }
+    .fact dd { margin: 0; font-weight: 600; text-align: right; }
+
+    /* Same dark band with a gold rule as the widget's live estimate bar. */
+    .price {
+      margin-top: 18px;
+      padding: 18px 20px;
+      border-radius: 12px;
+      background: var(--ink);
+      border-bottom: 3px solid var(--gold);
+      color: #fff;
+    }
+    .price-label { display: block; font-size: 12px; color: #D6D3D1; text-transform: uppercase; letter-spacing: 0.6px; }
+    .price-value { display: block; font-size: 24px; font-weight: 700; margin-top: 4px; }
+    .price-note { display: block; font-size: 13px; color: #D6D3D1; margin-top: 6px; }
+
+    .disclaimer { color: var(--soft); font-size: 13px; margin: 18px 0 0; }
+    .contact { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+    .contact a { color: var(--gold-dark); font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .contact a:hover { text-decoration: underline; }
+
+    .card--nf .title { color: var(--ink); }
+    .card--nf .muted { margin-top: 8px; }
+
+    .foot { text-align: center; color: #A8A29E; font-size: 12px; margin-top: 20px; }
+
+    @media (max-width: 420px) {
+      .wrap { padding-top: 24px; }
+      .card { padding: 22px 18px; }
+      .title { font-size: 21px; }
+      .price-value { font-size: 21px; }
+      .fact { flex-direction: column; gap: 2px; }
+      .fact dd { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand">
+      <img src="/logo.png" alt="" />
+      <span class="brand-name">NM <span class="accent">Bau</span></span>
+    </div>
+
+    <section id="card" class="card" aria-live="polite">
+      <p class="muted">…</p>
+    </section>
+    <noscript>
+      <p class="muted" style="margin-top:16px">Az árajánlat megtekintéséhez engedélyezze a JavaScriptet. / Please enable JavaScript to view this estimate.</p>
+    </noscript>
+
+    <p class="foot">NM Bau</p>
+  </main>
+
+  <!-- External, not inline: the site's Content-Security-Policy allows scripts
+       from 'self' only. -->
+  <script src="/ajanlat-page.js"></script>
+</body>
+</html>
