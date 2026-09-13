@@ -3036,9 +3036,12 @@ function buildQuoteLink(sel, quote, lang, host, transcriptId = null) {
 //  page by id. Private access: the file has no public URL, so the only way in
 //  is that endpoint with the exact id.
 //
-//  Off until a Blob store is connected to the project (that is what sets
-//  BLOB_READ_WRITE_TOKEN). Without it the link simply has no &c= part and the
-//  page shows the estimate alone, exactly as before.
+//  Off until a Blob store is connected to the project. Connecting it sets
+//  BLOB_STORE_ID, which @vercel/blob pairs with the deployment's own OIDC
+//  token; a store connected with a read-write token sets BLOB_READ_WRITE_TOKEN
+//  instead. Either one turns this on. Without both the link simply has no &c=
+//  part and the page shows the estimate alone, exactly as before. The names
+//  assume the connection's default "BLOB" prefix.
 //
 //  Saved in the background next to the Zoho webhook, so it adds nothing to the
 //  customer's wait. The id is made before the save, so the link in the quote
@@ -3061,7 +3064,7 @@ const WIDGET_KICKOFFS = new Set([
 ]);
 
 function transcriptStoreEnabled() {
-    return !!(process.env.BLOB_READ_WRITE_TOKEN || "").trim();
+    return !!(process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN || "").trim();
 }
 
 // 24 random bytes -> 32 base64url characters.

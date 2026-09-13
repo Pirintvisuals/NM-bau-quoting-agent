@@ -29,7 +29,9 @@ export default async function handler(req, res) {
 
     const id = req.query && typeof req.query.id === "string" ? req.query.id : "";
     if (!ID_RE.test(id)) return notFound(res);
-    if (!(process.env.BLOB_READ_WRITE_TOKEN || "").trim()) return notFound(res);
+    // Store connected? (BLOB_STORE_ID + the deployment's OIDC token, or a
+    // read-write token - same check as transcriptStoreEnabled in faq-agent.js.)
+    if (!(process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN || "").trim()) return notFound(res);
 
     try {
         const blob = await get(`${TRANSCRIPT_PREFIX}${id}.json`, { access: "private", useCache: false });
