@@ -56,6 +56,8 @@
 // ---------------------------------------------------------------------------
 import { PRICE_LIST, rate, FT_PER_EUR_FALLBACK } from "./pricelist.js";
 import { waitUntil } from "@vercel/functions";
+import { put } from "@vercel/blob";
+import { randomBytes } from "node:crypto";
 
 // The old bathroom model's constants lived here - per-m² averages for tiling,
 // plumbing, sanitaryware and so on. Every one of them was replaced on
@@ -333,6 +335,11 @@ function esc(s) {
         ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// After "Ügyfél" in the owner's transcript: whether the customer typed the
+// answer or tapped a quick-answer chip (see viaOf). Typed answers are the ones
+// worth reading for what the bot misunderstood.
+const VIA_NOTE = { typed: " (beírta)", chip: " (gombbal)", form: " (űrlapon)" };
+
 // Render a chat history array as HTML for the OWNER e-mail, so he can read the
 // conversation exactly as the customer saw it. Everything is escaped, newlines
 // are preserved, and the model's own control blocks (<!--DATA:...-->,
@@ -351,7 +358,7 @@ function transcriptHtml(rows) {
                 .replace(/\[\[SPLIT\]\]/g, "\n\n")
                 .trim();
             if (!clean) return "";
-            return `<p style="margin:0 0 10px"><b>${who}:</b><br>${esc(clean).replace(/\n/g, "<br>")}</p>`;
+            return `<p style="margin:0 0 10px"><b>${who}${VIA_NOTE[viaOf(m)] || ""}:</b><br>${esc(clean).replace(/\n/g, "<br>")}</p>`;
         })
         .join("");
 }
@@ -369,7 +376,7 @@ function transcriptText(rows) {
                 .replace(/\[\[SPLIT\]\]/g, "\n")
                 .replace(/\*\*/g, "")
                 .trim();
-            return clean ? `${who}:\n${clean}\n` : "";
+            return clean ? `${who}${VIA_NOTE[viaOf(m)] || ""}:\n${clean}\n` : "";
         })
         .filter(Boolean)
         .join("\n");
@@ -860,7 +867,7 @@ function buildBathroom(sel, cur = "huf") {
 }
 
 // Exported for unit testing the pricing math (no effect in production).
-export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget, buildQuoteLink };
+export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget, buildQuoteLink, transcriptMessages };
 
 // ---------------------------------------------------------------------------
 //  FLOW CONFIG - every project type asks its OWN question set. The backend drives
@@ -2714,7 +2721,7 @@ export default async function handler(request, response) {
         // an answer we throw away - and give it one more chance to say something
         // that contradicts the quote.
         if (!nextField && isQuoteReady(preSel)) {
-            return await finishQuote(preSel, history, lang, response, { sessionId: (request.body || {}).sessionId, host: requestHost(request) });
+            return await finishQuote(preSel, history, lang, response, { sessionId: (request.body || {}).sessionId, host: requestHost(request), contactLine: submitted ? contactLineOf(determined) : null });
         }
 
         // --- CONTACT FORM, also decided before the model call ---
@@ -2755,8 +2762,7 @@ export default async function handler(request, response) {
         // which the providers reject outright. Give it the submission as the
         // user's turn, exactly as the widget shows it in the transcript.
         if (messages.length === 1) {
-            const said = CONTACT_FIELDS.map((k) => determined[k]).filter(Boolean).join(" · ");
-            messages.push({ role: "user", content: said || String(question || "") || "?" });
+            messages.push({ role: "user", content: contactLineOf(determined) || String(question || "") || "?" });
         }
 
 
@@ -2798,7 +2804,7 @@ export default async function handler(request, response) {
         // Normally the check above catches this before the model call; this is the
         // case where the model's own DATA block completed the last missing field.
         if (isQuoteReady(sel)) {
-            return await finishQuote(sel, history, lang, response, { sessionId: (request.body || {}).sessionId, host: requestHost(request) });
+            return await finishQuote(sel, history, lang, response, { sessionId: (request.body || {}).sessionId, host: requestHost(request), contactLine: submitted ? contactLineOf(determined) : null });
         }
 
         aiAnswer = aiAnswer.replace(/<!--CHIPS:.*?-->/s, "").trim();
@@ -2948,16 +2954,23 @@ async function sendLeadWebhook(sel, quote, lang, meta = {}) {
 
 // ---------------------------------------------------------------------------
 //  QUOTE LINK
-//  A shareable, read-only URL for the finished estimate: /ajanlat?d=<summary>.
+//  A shareable, read-only URL for the finished estimate:
+//  /ajanlat?d=<summary>&c=<conversation id>.
 //
-//  There is no database in this project, so nothing is stored - the summary
-//  travels in the URL itself as base64url-encoded UTF-8 JSON, and
-//  public/ajanlat-page.js decodes it in the browser. Deliberately small: job
+//  The summary travels in the URL itself as base64url-encoded UTF-8 JSON, and
+//  public/ajanlat-page.js decodes it in the browser. The conversation does not
+//  fit in a URL, so it is saved to Vercel Blob under a random id (see
+//  TRANSCRIPT STORE below) and the page fetches it by that id. The summary stays
+//  in the URL anyway, so the estimate still shows if the store is not set up or
+//  the conversation cannot be read. Deliberately small: job
 //  type, size, tier, the range, the date, plus the language (so the page
 //  speaks the customer's language) and the basis (a labour-only range shown
 //  without saying so would mislead, exactly as "nettó" did). No quote_items -
-//  a long itemised URL breaks in some e-mail and chat clients - and no name,
-//  phone or e-mail, so the link is safe to forward or store in the CRM.
+//  a long itemised URL breaks in some e-mail and chat clients.
+//
+//  The conversation holds the customer's name, phone and e-mail, and anyone
+//  holding the link can read it. The id is 192 random bits, so it cannot be
+//  guessed, but the link itself must be treated as personal data.
 //
 //  NOT tamper-proof: anyone can edit the parameter and render a different
 //  price on an NM Bau-branded page. The page says it is an indicative estimate,
@@ -2990,8 +3003,9 @@ function requestHost(request) {
 //   [2, lang, projectType, size, tier, low, high, currency, basis, date]
 // size is a band token (s_3_4 ...), "nem_tudom" or the m² number; tier may be
 // ""; basis is "l" (labour), "t" (turnkey) or ""; date is YYYY-MM-DD.
+// transcriptId, when given, is appended as &c=<id> (36 more characters).
 // test-quote-link.mjs keeps every flow and language under the 255 limit.
-function buildQuoteLink(sel, quote, lang, host) {
+function buildQuoteLink(sel, quote, lang, host, transcriptId = null) {
     const base = quoteLinkBase(host);
     if (!base) return null;
     const raw = sel.size == null ? "" : String(sel.size).trim();
@@ -3011,7 +3025,115 @@ function buildQuoteLink(sel, quote, lang, host) {
         new Date().toISOString().slice(0, 10),
     ];
     const d = Buffer.from(JSON.stringify(summary), "utf8").toString("base64url");
-    return `${base}/ajanlat?d=${d}`;
+    const c = typeof transcriptId === "string" && TRANSCRIPT_ID_RE.test(transcriptId) ? `&c=${transcriptId}` : "";
+    return `${base}/ajanlat?d=${d}${c}`;
+}
+
+// ---------------------------------------------------------------------------
+//  TRANSCRIPT STORE
+//  Each finished conversation is saved as a private JSON file in Vercel Blob,
+//  at transcripts/<id>.json, and api/transcript.js hands it to the /ajanlat
+//  page by id. Private access: the file has no public URL, so the only way in
+//  is that endpoint with the exact id.
+//
+//  Off until a Blob store is connected to the project (that is what sets
+//  BLOB_READ_WRITE_TOKEN). Without it the link simply has no &c= part and the
+//  page shows the estimate alone, exactly as before.
+//
+//  Saved in the background next to the Zoho webhook, so it adds nothing to the
+//  customer's wait. The id is made before the save, so the link in the quote
+//  bubble does not have to wait for it either; the page retries once in case
+//  someone opens the link in the same second.
+//
+//  No expiry yet: files stay until deleted in the Vercel dashboard (Storage ->
+//  the Blob store -> transcripts/).
+// ---------------------------------------------------------------------------
+const TRANSCRIPT_PREFIX = "transcripts/"; // api/transcript.js reads the same folder
+const TRANSCRIPT_ID_RE = /^[A-Za-z0-9_-]{32}$/;
+const TRANSCRIPT_TIMEOUT_MS = 5000;
+
+// The hidden line the widget opens every conversation with (t().kickoff in
+// public/widget.js). The customer never saw it, so it is left out of the page.
+const WIDGET_KICKOFFS = new Set([
+    "Szeretnék árajánlatot egy felújításra.",
+    "I'd like a quote for a renovation.",
+    "Ich hätte gerne ein Angebot für eine Renovierung.",
+]);
+
+function transcriptStoreEnabled() {
+    return !!(process.env.BLOB_READ_WRITE_TOKEN || "").trim();
+}
+
+// 24 random bytes -> 32 base64url characters.
+function newTranscriptId() {
+    return randomBytes(24).toString("base64url");
+}
+
+// The contact form's submission as one line, the way the widget echoes it into
+// the chat. The widget only adds it to the history AFTER the server accepts it,
+// so the request that finishes the quote never carries it.
+function contactLineOf(values) {
+    return CONTACT_FIELDS.map((k) => values && values[k]).filter(Boolean).join(" · ");
+}
+
+// How a customer message was given, as the widget tags it: "typed" into the
+// box, a quick-answer "chip", or the contact "form". Anything else (an older
+// cached widget sends nothing) is left out rather than guessed.
+const MESSAGE_VIA = new Set(["typed", "chip", "form"]);
+function viaOf(m) {
+    return m && m.role === "user" && MESSAGE_VIA.has(m.via) ? m.via : null;
+}
+
+// The conversation as the customer saw it: the model's control blocks, the
+// [[SPLIT]] bubble markers and **bold** markers removed, the hidden kickoff
+// dropped, empty turns skipped. Customer messages keep their exact wording and
+// how they were given, so a typed answer the bot misread can be found later.
+function transcriptMessages(rows) {
+    if (!Array.isArray(rows)) return [];
+    const out = [];
+    rows.forEach((m, i) => {
+        if (!m || typeof m.content !== "string") return;
+        const isBot = m.role === "assistant" || m.role === "model";
+        if (!isBot && m.role !== "user") return;
+        if (i === 0 && !isBot && WIDGET_KICKOFFS.has(m.content.trim())) return;
+        const text = m.content
+            .replace(/<!--DATA:.*?-->/gs, "")
+            .replace(/<!--CHIPS:.*?-->/gs, "")
+            .replace(/\[\[SPLIT\]\]/g, "\n\n")
+            .replace(/\*\*/g, "")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+        if (!text) return;
+        const via = viaOf(m);
+        out.push(via ? { role: "customer", text, via } : { role: isBot ? "assistant" : "customer", text });
+    });
+    return out;
+}
+
+async function saveTranscript(id, rows, lang) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), TRANSCRIPT_TIMEOUT_MS);
+    try {
+        const doc = {
+            v: 1,
+            lang: normLang(lang),
+            created_at: new Date().toISOString(),
+            messages: transcriptMessages(rows),
+        };
+        await put(`${TRANSCRIPT_PREFIX}${id}.json`, JSON.stringify(doc), {
+            access: "private",
+            contentType: "application/json",
+            addRandomSuffix: false,
+            allowOverwrite: false,
+            abortSignal: ac.signal,
+        });
+        return { ok: true };
+    } catch (err) {
+        console.error("Beszelgetes mentese sikertelen:", (err && err.message) || String(err));
+        return { ok: false };
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3036,30 +3158,39 @@ async function finishQuote(sel, history, lang, response, meta = {}) {
     // message short and never shows the price that was quoted.
     // A link the customer can reopen later, and the CRM can store. Built once,
     // so the chat and the webhook always carry the identical URL.
-    const quoteLink = buildQuoteLink(sel, quote, lang, meta.host);
+    // The id is made here, before anything is saved, so the link can go into the
+    // quote bubble straight away while the save itself runs in the background.
+    const transcriptId = transcriptStoreEnabled() ? newTranscriptId() : null;
+    const quoteLink = buildQuoteLink(sel, quote, lang, meta.host, transcriptId);
     const customerAnswer = renderCustomerQuote(quote, sel, lang, { quoteLink });
+    // A submitted contact form is not in `history` yet (see contactLineOf).
+    const transcript = [
+        ...(Array.isArray(history) ? history : []),
+        ...(meta.contactLine ? [{ role: "user", content: meta.contactLine, via: "form" }] : []),
+        { role: "assistant", content: customerAnswer },
+    ];
     await sendQuoteEmail(sel, quote, {
         to: process.env.LEAD_EMAIL_TO || "traumbaddesign@gmail.com",
         toCustomer: false,
-        transcript: [
-            ...(Array.isArray(history) ? history : []),
-            { role: "assistant", content: customerAnswer },
-        ],
+        transcript,
     });
 
     // The lead is complete here: contact details, the job, and the priced quote.
-    // Push it to the CRM - in the BACKGROUND. The webhook is bookkeeping; the
-    // quote is what the customer is waiting for, so a slow Zoho must not add up
-    // to 5 s to their reply. waitUntil lets the response go out now while Vercel
-    // keeps the function alive until the POST settles.
-    const leadDelivery = sendLeadWebhook(sel, quote, lang, { sessionId: meta.sessionId, quoteLink }).catch(() => {});
+    // Push it to the CRM and save the conversation - in the BACKGROUND. Both are
+    // bookkeeping; the quote is what the customer is waiting for, so a slow Zoho
+    // or Blob must not add seconds to their reply. waitUntil lets the response go
+    // out now while Vercel keeps the function alive until both settle.
+    const leadDelivery = Promise.all([
+        sendLeadWebhook(sel, quote, lang, { sessionId: meta.sessionId, quoteLink }).catch(() => {}),
+        transcriptId ? saveTranscript(transcriptId, transcript, lang) : null,
+    ]);
     if (hasVercelWaitUntil()) {
         waitUntil(leadDelivery);
     } else if (process.env.VERCEL) {
         // On Vercel but without a request context, waitUntil would be a silent
         // no-op and the platform could freeze the function mid-request - losing
         // the lead. Pay the latency instead of the lead.
-        console.warn("waitUntil nem elerheto - a Zoho webhookot kivarjuk.");
+        console.warn("waitUntil nem elerheto - a Zoho webhookot es a mentest kivarjuk.");
         await leadDelivery;
     }
     // Locally (node server.js) the process is long-lived, so the unawaited

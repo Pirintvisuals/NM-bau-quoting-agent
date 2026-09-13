@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import handler from './api/faq-agent.js';
 import statsHandler from './api/stats.js';
+import transcriptHandler from './api/transcript.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,6 +155,26 @@ const server = http.createServer(async (req, res) => {
             console.error('Stats error:', error.message);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: error.message }));
+        }
+        return;
+    }
+
+    // Saved conversation for the quote page (read-only, by id).
+    if (req.url.startsWith('/api/transcript') && req.method === 'GET') {
+        const u = new URL(req.url, `http://${req.headers.host}`);
+        req.query = Object.fromEntries(u.searchParams.entries());
+        res.status = (code) => { res.statusCode = code; return res; };
+        res.json = (data) => {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(data));
+            return res;
+        };
+        try {
+            await transcriptHandler(req, res);
+        } catch (error) {
+            console.error('Transcript error:', error.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'server_error' }));
         }
         return;
     }

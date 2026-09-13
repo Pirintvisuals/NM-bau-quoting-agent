@@ -806,7 +806,7 @@
       // Accepted - now it is worth showing.
       if (shown) {
         addMessage("user", shown);
-        conversationHistory.push({ role: "user", content: shown });
+        conversationHistory.push({ role: "user", content: shown, via: "form" });
       }
 
       if (data.lead && !quoteDone) {
@@ -1022,7 +1022,12 @@
     if (presetText === undefined) inputElement.value = "";
     sending = true;
 
-    conversationHistory.push({ role: "user", content: text });
+    // `via` records HOW they answered: typed into the box, or a quick-answer
+    // chip. The owner reads typed answers to see what the bot misunderstood.
+    // The hidden kickoff is neither, so it carries no `via`.
+    const entry = { role: "user", content: text };
+    if (!hidden) entry.via = presetText === undefined ? "typed" : "chip";
+    conversationHistory.push(entry);
     addThinking();
 
     try {

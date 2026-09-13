@@ -1,4 +1,8 @@
-// Read-only quote summary page: /ajanlat?d=<summary>.
+// Read-only quote summary page: /ajanlat?d=<summary>&c=<conversation id>.
+//
+// When the link has a c= id, the full conversation is fetched from
+// /api/transcript (saved server-side in Vercel Blob) and shown under the
+// estimate. Without it, or if it cannot be read, the estimate shows alone.
 //
 // The link is built server-side in finishQuote() (api/faq-agent.js). The
 // summary travels in the URL itself as base64url-encoded UTF-8 JSON - the
@@ -19,6 +23,12 @@
 
   var PHONE = "+36 20 254 6624";
   var MAX_PARAM = 2048;
+  var CHAT_ID_RE = /^[A-Za-z0-9_-]{32}$/;
+  var MAX_CHAT_MSGS = 80;
+  var MAX_CHAT_TEXT = 12000;
+  // The conversation is saved in the background as the quote is sent, so a link
+  // opened within a second or two can arrive before the file. Try once more.
+  var CHAT_RETRY_MS = 2000;
 
   // Same labels as the chat recap (LABELS / I18N_LABELS / sizeLabel in
   // api/faq-agent.js) - keep them in step.
@@ -39,6 +49,12 @@
       call: "Kérdése van? Hívjon minket:",
       nfTitle: "Ez az árajánlat nem található",
       nfBody: "A link hiányos vagy sérült. Kérjen új előzetes árajánlatot a weboldalunkon, vagy hívjon minket.",
+      chatTitle: "A beszélgetés",
+      chatLoading: "A beszélgetés betöltése…",
+      chatUnavailable: "A beszélgetés most nem érhető el.",
+      you: "Ügyfél",
+      bot: "NM Bau asszisztens",
+      via: { typed: "beírta", chip: "gombbal választotta", form: "űrlapon adta meg" },
       locale: "hu-HU",
       jobs: { furdo: "Fürdőszoba", konyha: "Konyha", lakas: "Teljes lakás", haz: "Családi ház", szoba: "Egy szoba" },
       tiers: { basic: "Alap / takarékos", mid: "Közepes", premium: "Prémium", nem_tudom: "Nem tudja (alap: közepes)" },
@@ -59,6 +75,12 @@
       call: "Questions? Call us:",
       nfTitle: "This estimate could not be found",
       nfBody: "The link is incomplete or damaged. Request a new estimate on our website, or give us a call.",
+      chatTitle: "The conversation",
+      chatLoading: "Loading the conversation…",
+      chatUnavailable: "The conversation is not available right now.",
+      you: "Customer",
+      bot: "NM Bau assistant",
+      via: { typed: "typed", chip: "tapped a quick answer", form: "contact form" },
       locale: "en-GB",
       jobs: { furdo: "Bathroom", konyha: "Kitchen", lakas: "Whole flat", haz: "Family house", szoba: "A single room" },
       tiers: { basic: "Basic / budget", mid: "Mid-range", premium: "Premium", nem_tudom: "Not sure (default: mid-range)" },
@@ -79,6 +101,12 @@
       call: "Fragen? Rufen Sie uns an:",
       nfTitle: "Dieses Angebot wurde nicht gefunden",
       nfBody: "Der Link ist unvollständig oder beschädigt. Fordern Sie auf unserer Website ein neues Angebot an oder rufen Sie uns an.",
+      chatTitle: "Das Gespräch",
+      chatLoading: "Gespräch wird geladen…",
+      chatUnavailable: "Das Gespräch ist gerade nicht verfügbar.",
+      you: "Kunde",
+      bot: "NM Bau Assistent",
+      via: { typed: "selbst getippt", chip: "Schnellantwort gewählt", form: "Kontaktformular" },
       locale: "de-AT",
       jobs: { furdo: "Badezimmer", konyha: "Küche", lakas: "Ganze Wohnung", haz: "Einfamilienhaus", szoba: "Ein Zimmer" },
       tiers: { basic: "Einfach / sparsam", mid: "Mittel", premium: "Premium", nem_tudom: "Weiß nicht (Standard: Mittel)" },
@@ -248,6 +276,62 @@
     card.appendChild(contactLine(t));
   }
 
+  // Only what the endpoint is meant to return; anything else is dropped.
+  function validMessages(doc) {
+    if (!doc || !Array.isArray(doc.messages) || doc.messages.length > MAX_CHAT_MSGS) return null;
+    var out = [];
+    for (var i = 0; i < doc.messages.length; i++) {
+      var m = doc.messages[i];
+      if (!m || (m.role !== "customer" && m.role !== "assistant")) return null;
+      if (!isText(m.text, MAX_CHAT_TEXT)) return null;
+      var via = m.role === "customer" && (m.via === "typed" || m.via === "chip" || m.via === "form") ? m.via : null;
+      out.push({ role: m.role, text: m.text, via: via });
+    }
+    return out.length ? out : null;
+  }
+
+  function fetchChat(id, retried, done) {
+    fetch("/api/transcript?id=" + encodeURIComponent(id), { credentials: "omit", cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 404 && !retried) {
+          setTimeout(function () { fetchChat(id, true, done); }, CHAT_RETRY_MS);
+          return null;
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json().then(function (doc) { done(validMessages(doc)); });
+      })
+      .catch(function () { done(null); });
+  }
+
+  // Written with textContent only; newlines are kept by white-space: pre-line.
+  function renderChat(id, t) {
+    var section = el("section", "card chat");
+    section.setAttribute("aria-live", "polite");
+    section.appendChild(el("h2", "chat-title", t.chatTitle));
+    var status = el("p", "muted", t.chatLoading);
+    section.appendChild(status);
+    document.getElementById("card").insertAdjacentElement("afterend", section);
+
+    fetchChat(id, false, function (messages) {
+      if (!messages) {
+        status.textContent = t.chatUnavailable;
+        return;
+      }
+      section.removeChild(status);
+      var list = el("ol", "chat-list");
+      messages.forEach(function (m) {
+        var mine = m.role === "customer";
+        // Typed answers get their own look: they are the ones to read for what
+        // the bot misunderstood.
+        var item = el("li", "msg " + (mine ? "msg--customer" : "msg--bot") + (m.via === "typed" ? " msg--typed" : ""));
+        item.appendChild(el("span", "msg-who", (mine ? t.you : t.bot) + (m.via ? " · " + t.via[m.via] : "")));
+        item.appendChild(el("p", "msg-text", m.text));
+        list.appendChild(item);
+      });
+      section.appendChild(list);
+    });
+  }
+
   function renderNotFound() {
     var lang = browserLang();
     var t = T[lang];
@@ -259,11 +343,18 @@
   }
 
   var summary = null;
+  var chatId = null;
   try {
-    summary = decode(new URLSearchParams(window.location.search).get("d"));
+    var params = new URLSearchParams(window.location.search);
+    summary = decode(params.get("d"));
+    chatId = params.get("c");
   } catch (e) {
     summary = null;
   }
-  if (summary) renderQuote(summary);
-  else renderNotFound();
+  if (summary) {
+    renderQuote(summary);
+    if (typeof chatId === "string" && CHAT_ID_RE.test(chatId)) renderChat(chatId, T[pickLang(summary.lang)]);
+  } else {
+    renderNotFound();
+  }
 })();
