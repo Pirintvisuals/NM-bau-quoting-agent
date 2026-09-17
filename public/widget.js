@@ -188,10 +188,10 @@
   const SESSION_REPLAY = config.sessionReplay !== false;
 
   // Fire an analytics event. No-ops safely if PostHog isn't loaded / no key set.
-  function track(event, props) {
+  function track(event, props, options) {
     try {
       if (window.posthog && typeof window.posthog.capture === "function") {
-        window.posthog.capture(event, props || {});
+        window.posthog.capture(event, props || {}, options);
       }
     } catch (e) {}
   }
@@ -239,6 +239,24 @@
   let estimateBarEl = null; // live "becsült ár" banner (full flat/house only)
   let lastProgress = 0, lastProgressTotal = 0; // for drop-off analytics
   let quoteDone = false; // so quote_completed fires once per conversation
+  let filledFields = [];  // field NAMES answered so far (never the values)
+  let lastField = null;   // most recently answered field -> "where they stopped"
+  let turns = 0;          // messages the customer sent
+
+  function funnelSnapshot() {
+    return { last_field: lastField, fields_answered: filledFields.length, answered: lastProgress, total: lastProgressTotal, turns, completed: quoteDone };
+  }
+  // Names of fields newly filled between two answer-states.
+  function newlyFilled(prev) {
+    const ok = (o, k) => o && o[k] != null && String(o[k]).trim() !== "";
+    return Object.keys(convState || {}).filter((k) => ok(convState, k) && !ok(prev, k) && filledFields.indexOf(k) === -1);
+  }
+  let leftSent = false;
+  function trackLeave() {
+    if (leftSent || !started) return;
+    leftSent = true;
+    track("widget_left", funnelSnapshot(), { transport: "sendBeacon" });
+  }
 
   let container = null;
 
@@ -313,9 +331,10 @@
 
   // Leaving the page is final - send immediately, no grace period.
   function watchPageExit() {
-    window.addEventListener("pagehide", () => flushTranscript("oldal elhagyva"));
+    window.addEventListener("pagehide", () => { trackLeave(); flushTranscript("oldal elhagyva"); });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flushTranscript("lap háttérbe került");
+      if (document.visibilityState === "hidden") { trackLeave(); flushTranscript("lap háttérbe került"); }
+      else leftSent = false; // came back: allow a fresh snapshot next time
     });
   }
 
@@ -454,7 +473,7 @@
       }, 180);
       chatOpen = false;
       if (launcher) launcher.classList.remove("active");
-      track("chat_closed", { answered: lastProgress, total: lastProgressTotal });
+      track("chat_closed", funnelSnapshot());
       // Closing usually means "I'm done" - send the owner the conversation after
       // a short grace period, cancelled below if they reopen it.
       if (closeTimer) clearTimeout(closeTimer);
@@ -654,6 +673,7 @@
   function renderContactForm(form, errors) {
     clearChips();
     clearContactForm();
+    if (!errors) track("contact_form_shown", funnelSnapshot());
 
     const wrap = document.createElement("form");
     wrap.className = "faq-form";
@@ -784,7 +804,7 @@
         body: JSON.stringify({ contact: values, history: conversationHistory, state: convState, lang: LANG }),
       });
       removeThinking();
-      if (!res.ok) { addMessage("bot", t().errGeneric); sending = false; return; }
+      if (!res.ok) { track("widget_error", { kind: "http", status: res.status, after_field: lastField }); addMessage("bot", t().errGeneric); sending = false; return; }
       const data = await res.json();
       adoptReplyLang(data.lang);
       if (data.state && typeof data.state === "object") convState = data.state;
@@ -798,11 +818,13 @@
       // Rejected: put the form back with the offending fields marked, and leave
       // the conversation itself untouched.
       if (data.formErrors && data.form) {
+        track("contact_form_invalid", { fields: Object.keys(data.formErrors || {}) });
         renderContactForm(data.form, data.formErrors);
         sending = false;
         return;
       }
 
+      track("contact_form_submitted", funnelSnapshot());
       // Accepted - now it is worth showing.
       if (shown) {
         addMessage("user", shown);
@@ -814,7 +836,7 @@
         const st = data.lead.sel || {}, q = data.lead.quote || {};
         track("quote_completed", {
           project_type: st.projectType, size: st.size, tier: st.tier,
-          quote_low: q.low, quote_high: q.high,
+          quote_low: q.low, quote_high: q.high, fields_answered: filledFields.length, turns,
         });
       }
 
@@ -1028,6 +1050,9 @@
     const entry = { role: "user", content: text };
     if (!hidden) entry.via = presetText === undefined ? "typed" : "chip";
     conversationHistory.push(entry);
+    if (!hidden) { turns++; track("message_sent", { via: entry.via, after_field: lastField }); }
+    let prevState = {};
+    try { prevState = Object.assign({}, convState); } catch (e) {}
     addThinking();
 
     try {
@@ -1040,6 +1065,7 @@
       removeThinking();
 
       if (!res.ok) {
+        track("widget_error", { kind: "http", status: res.status, after_field: lastField });
         addMessage("bot", t().errGeneric);
         sending = false;
         return;
@@ -1060,16 +1086,24 @@
         // One event per answered question -> "how many questions they answer",
         // and the last value reached drives the drop-off funnel. No PII: we send
         // counts and the field just answered, never the typed text.
-        if (!hidden && data.progress > lastProgress) {
-          track("question_answered", {
-            answered: data.progress,
-            total: data.progressTotal,
-            project_type: convState && convState.projectType,
-          });
-        }
         lastProgress = data.progress;
         lastProgressTotal = data.progressTotal;
       }
+      if (!hidden) try {
+        const fresh = newlyFilled(prevState);
+        fresh.forEach((field) => {
+          filledFields.push(field);
+          lastField = field;
+          track("question_answered", {
+            field,
+            step: filledFields.length,
+            answered: lastProgress,
+            total: lastProgressTotal,
+            project_type: convState && convState.projectType,
+          });
+        });
+        if (!fresh.length && !data.lead) track("message_unmatched", { after_field: lastField, answered: lastProgress });
+      } catch (e) {} // analytics only - never interrupts the quote
       if ("estimate" in data) updateEstimate(data.estimate);
 
       // Completion: backend returns `lead` only when the quote is ready. Send
@@ -1083,6 +1117,8 @@
           tier: s.tier,
           quote_low: q.low,
           quote_high: q.high,
+          fields_answered: filledFields.length,
+          turns,
         });
       }
       const botResponse = data.answer || "Elnézést, nem találtam választ.";

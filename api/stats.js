@@ -55,54 +55,100 @@ export default async function handler(req, res) {
     let days = parseInt((req.query && req.query.days) || "30", 10);
     if (!Number.isFinite(days) || days < 1 || days > 365) days = 30;
 
-    const hogql = `
+    const since = `timestamp > now() - INTERVAL ${days} DAY`;
+    const sid = "properties.$session_id";
+    // Unique visits (PostHog sessions) that reached each step, per widget.
+    const u = (ev) => `count(DISTINCT if(event = '${ev}', ${sid}, NULL))`;
+    const funnelQ = `
         SELECT
             coalesce(properties.client, '(unknown)') AS client,
-            countIf(event = 'widget_loaded')                       AS loaded,
-            countIf(event = 'chat_opened')                         AS opened,
-            countIf(event = 'quote_started')                       AS started,
-            countIf(event = 'quote_completed')                     AS completed,
-            countIf(event = 'email_requested')                     AS emails,
-            count(DISTINCT person_id)                              AS people
+            ${u("widget_loaded")}          AS loaded,
+            ${u("chat_opened")}            AS opened,
+            ${u("quote_started")}          AS started,
+            ${u("question_answered")}      AS answered_one,
+            ${u("contact_form_shown")}     AS contact_form,
+            ${u("quote_completed")}        AS completed,
+            ${u("email_requested")}        AS emails,
+            ${u("widget_error")}           AS errors,
+            count(DISTINCT person_id)       AS people
         FROM events
-        WHERE timestamp > now() - INTERVAL ${days} DAY
+        WHERE ${since}
         GROUP BY client
         ORDER BY loaded DESC
+        LIMIT 1000
+    `;
+    // Last question each visit answered (field name only).
+    const lastFieldQ = `
+        SELECT coalesce(properties.client, '(unknown)') AS client, ${sid} AS sid,
+               argMax(properties.field, timestamp) AS last_field,
+               count() AS answers
+        FROM events
+        WHERE ${since} AND event = 'question_answered'
+        GROUP BY client, sid
+        LIMIT 50000
+    `;
+    // Visits that started / finished, so we know who dropped.
+    const sessionsQ = `
+        SELECT coalesce(properties.client, '(unknown)') AS client, ${sid} AS sid,
+               max(if(event = 'quote_completed', 1, 0)) AS done
+        FROM events
+        WHERE ${since} AND event IN ('quote_started', 'quote_completed')
+        GROUP BY client, sid
+        LIMIT 50000
     `;
 
-    try {
+    async function runQuery(hogql) {
         const r = await fetch(`${POSTHOG_API}/api/projects/${PROJECT_ID}/query/`, {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${key}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-                query: { kind: "HogQLQuery", query: hogql },
-            }),
+            body: JSON.stringify({ query: { kind: "HogQLQuery", query: hogql } }),
         });
-
         if (!r.ok) {
             const text = await r.text();
-            return res.status(502).json({
-                error: `PostHog said ${r.status}.`,
-                detail: text.slice(0, 500),
-            });
+            const err = new Error(`PostHog said ${r.status}.`);
+            err.detail = text.slice(0, 500);
+            throw err;
         }
-
         const data = await r.json();
-        const rows = (data.results || []).map((row) => ({
+        return data.results || [];
+    }
+
+    try {
+        const [funnel, lastFields, sessions] = await Promise.all([
+            runQuery(funnelQ), runQuery(lastFieldQ), runQuery(sessionsQ),
+        ]);
+
+        const rows = funnel.map((row) => ({
             client: row[0],
             loaded: row[1],
             opened: row[2],
             started: row[3],
-            completed: row[4],
-            emails: row[5],
-            people: row[6],
+            answeredOne: row[4],
+            contactForm: row[5],
+            completed: row[6],
+            emails: row[7],
+            errors: row[8],
+            people: row[9],
         }));
 
-        return res.status(200).json({ days, rows });
+        // Drop-off: every visit that started but never finished, bucketed by the
+        // last question it answered ("(none)" = left before answering anything).
+        const last = new Map();
+        lastFields.forEach(([client, id, field]) => last.set(client + "|" + id, field));
+        const dropoff = {};
+        sessions.forEach(([client, id, done]) => {
+            if (done) return;
+            const field = last.get(client + "|" + id) || "(none)";
+            dropoff[client] = dropoff[client] || {};
+            dropoff[client][field] = (dropoff[client][field] || 0) + 1;
+        });
+
+        return res.status(200).json({ days, rows, dropoff });
     } catch (e) {
+        if (e && e.detail) return res.status(502).json({ error: e.message, detail: e.detail });
         return res.status(500).json({ error: String(e && e.message || e) });
     }
 }

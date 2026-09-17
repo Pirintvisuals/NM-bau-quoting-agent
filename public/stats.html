@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NM Bau - Usage</title>
+  <title>Quoting Agents Usage</title>
   <style>
     body { margin: 0; font-family: 'Inter', -apple-system, sans-serif; background: #FAFAF7; color: #1C1917; }
     .wrap { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
@@ -22,13 +22,16 @@
     .pct { color: #57534E; }
     .msg { color: #57534E; padding: 24px 0; }
     .err { color: #B91C1C; }
+    h2 { font-size: 18px; margin: 28px 0 10px; }
+    h3 { font-size: 15px; margin: 20px 0 8px; }
+    .scroll { overflow-x: auto; }
     .foot { color: #A8A29E; font-size: 12px; margin-top: 16px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>NM Bau <span class="accent">usage</span></h1>
-    <p class="sub">How people are using the quoting widget, per client website.</p>
+    <h1>Quoting agents <span class="accent">usage</span></h1>
+    <p class="sub">NM Bau, Kazán Kecskemét, Aqua System and Klíma Kecskemét, one row each.</p>
 
     <div class="controls">
       <label for="days">Period:</label>
@@ -42,7 +45,7 @@
     </div>
 
     <div id="out" class="msg">Loading...</div>
-    <p class="foot">Counts come straight from PostHog. "Finished %" = finished quotes / quotes started.</p>
+    <p class="foot">Counts are unique visits (PostHog sessions), not clicks. Percentages compare with the column before; "Open → finish" = finished / opened.</p>
   </div>
 
   <script src="stats-page.js"></script>
