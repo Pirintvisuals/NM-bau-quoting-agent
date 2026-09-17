@@ -177,7 +177,7 @@
   // "Project API Key" (starts with phc_), and either paste it below or set
   // window.NMBAU_CONFIG.posthogKey before loading this script. Until a real key
   // is set, analytics simply stays off and the widget works exactly as before.
-  const POSTHOG_KEY = config.posthogKey || "phc_nroFe9H8K9hbVENBqcRRrWW9GXxoyVZhSomy3U8Zhu4P";
+  const POSTHOG_KEY = config.posthogKey || "phc_v8Kz9YKBCizrjV3vLzRxdiqvikGJpYy4FMET92Z8htpP";
   const POSTHOG_HOST = config.posthogHost || "https://eu.i.posthog.com";
   // Identifies which client/site this embed belongs to. Set per client via
   // window.NMBAU_CONFIG.client = "clientname"; falls back to the host name.
