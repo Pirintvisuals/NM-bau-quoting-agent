@@ -794,6 +794,8 @@
       .map((f) => values[f.key])
       .filter(Boolean)
       .join(" · ");
+    let prevFormState = {};
+    try { prevFormState = Object.assign({}, convState); } catch (e) {}
     clearContactForm();
     addThinking();
 
@@ -824,6 +826,15 @@
         return;
       }
 
+      // The form fills several fields at once (name, e-mail, phone...): log each
+      // one, so "where they stopped" moves past the contact step. Names only.
+      try {
+        newlyFilled(prevFormState).forEach((field) => {
+          filledFields.push(field);
+          lastField = field;
+          track("question_answered", { field, step: filledFields.length, answered: lastProgress, total: lastProgressTotal, via: "form" });
+        });
+      } catch (e) {}
       track("contact_form_submitted", funnelSnapshot());
       // Accepted - now it is worth showing.
       if (shown) {
