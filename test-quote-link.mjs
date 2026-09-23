@@ -1,7 +1,7 @@
 // A quote link ends up in a Bigin URL field, which holds at most 255
 // characters. Check every flow, language, size form and tier - with the largest
-// amounts and a conversation id - stays under that, and that no contact detail
-// ends up in the link.
+// amounts, an optional extra and a conversation id - stays under that, and that
+// no contact detail ends up in the link.
 import { buildQuoteLink, transcriptMessages } from "./api/faq-agent.js";
 
 const LIMIT = 255;
@@ -15,7 +15,13 @@ for (const lang of ["hu", "en", "de"]) {
         for (const size of ["s_3_4", "s_11p", "nem_tudom", "999,5", "120 m2", "", null]) {
             for (const tier of ["basic", "premium", "nem_tudom", null]) {
                 const sel = { projectType, size, tier, name: "Teszt Elek", email: "teszt@example.com", phone: "+36 30 000 0000" };
-                const quote = { low: 9_999_999_999, high: 9_999_999_999, currency: lang === "hu" ? "huf" : "eur", basis: "turnkey" };
+                // Worst case for length: the biggest numbers the format allows, and
+                // the optional extra that adds two more of them.
+                const quote = {
+                    low: 9_999_999_999, high: 9_999_999_999,
+                    currency: lang === "hu" ? "huf" : "eur", basis: "turnkey",
+                    options: [{ key: "repipe", amount: 9_999_999_999, low: 9_999_999_999, high: 9_999_999_999 }],
+                };
                 const link = buildQuoteLink(sel, quote, lang, HOST, CHAT_ID);
                 const url = new URL(link);
                 const d = url.searchParams.get("d");
@@ -23,7 +29,7 @@ for (const lang of ["hu", "en", "de"]) {
                 longest = Math.max(longest, link.length);
                 const problems = [];
                 if (link.length > LIMIT) problems.push(`${link.length} karakter`);
-                if (!Array.isArray(a) || a.length !== 10 || a[0] !== 2) problems.push("rossz formátum");
+                if (!Array.isArray(a) || a.length !== 12 || a[0] !== 2) problems.push("rossz formátum");
                 if (url.searchParams.get("c") !== CHAT_ID) problems.push("hiányzik a beszélgetés azonosítója");
                 if (/Teszt|example|000 0000/.test(link + JSON.stringify(a))) problems.push("személyes adat a linkben");
                 if (problems.length) {
@@ -32,6 +38,16 @@ for (const lang of ["hu", "en", "de"]) {
                 }
             }
         }
+    }
+}
+
+// Without an option the link keeps its exact old shape, so older links stay valid.
+{
+    const plain = buildQuoteLink({ projectType: "furdo" }, { low: 1, high: 2, currency: "huf", basis: "labour" }, "hu", HOST);
+    const a = JSON.parse(Buffer.from(new URL(plain).searchParams.get("d"), "base64url").toString("utf8"));
+    if (a.length !== 10) {
+        fail++;
+        console.log(`✗ opció nélkül is ${a.length} elemű a link`);
     }
 }
 

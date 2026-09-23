@@ -9,7 +9,8 @@
 // project has no database, so nothing is stored anywhere. Current links carry a
 // compact array of tokens and numbers (so the URL fits a 255-character CRM
 // field), turned back into labels here; the first, longer object format is
-// still accepted.
+// still accepted. Two extra numbers on the end are the one optional extra
+// (a complete re-pipe), which is priced but deliberately not in the total.
 //
 // Everything decoded here came from a URL anyone can edit, so it is treated as
 // untrusted: strictly validated, capped in length, and written with
@@ -49,6 +50,8 @@
       call: "Kérdése van? Hívjon minket:",
       nfTitle: "Ez az árajánlat nem található",
       nfBody: "A link hiányos vagy sérült. Kérjen új előzetes árajánlatot a weboldalunkon, vagy hívjon minket.",
+      optionLabel: "Választható: komplett víz- és csatornavezeték-csere",
+      optionNote: "Ha a mostani elrendezés marad, erre általában nincs szükség - a fenti összeg nem tartalmazza.",
       chatTitle: "A beszélgetés",
       chatLoading: "A beszélgetés betöltése…",
       chatUnavailable: "A beszélgetés most nem érhető el.",
@@ -75,6 +78,8 @@
       call: "Questions? Call us:",
       nfTitle: "This estimate could not be found",
       nfBody: "The link is incomplete or damaged. Request a new estimate on our website, or give us a call.",
+      optionLabel: "Optional: a complete replacement of the water and waste pipes",
+      optionNote: "If the layout stays as it is, this is usually not needed - the amount above does not include it.",
       chatTitle: "The conversation",
       chatLoading: "Loading the conversation…",
       chatUnavailable: "The conversation is not available right now.",
@@ -101,6 +106,8 @@
       call: "Fragen? Rufen Sie uns an:",
       nfTitle: "Dieses Angebot wurde nicht gefunden",
       nfBody: "Der Link ist unvollständig oder beschädigt. Fordern Sie auf unserer Website ein neues Angebot an oder rufen Sie uns an.",
+      optionLabel: "Optional: kompletter Austausch der Wasser- und Abwasserleitungen",
+      optionNote: "Wenn die bestehende Anordnung bleibt, ist das meist nicht nötig - in der Summe oben ist es nicht enthalten.",
       chatTitle: "Das Gespräch",
       chatLoading: "Gespräch wird geladen…",
       chatUnavailable: "Das Gespräch ist gerade nicht verfügbar.",
@@ -167,9 +174,10 @@
   }
 
   // Version 2: [2, lang, projectType, size, tier, low, high, currency, basis, date]
+  // plus, when the quote has one, [optionLow, optionHigh] for the named extra.
   // -> the same summary object the first link format carried, or null.
   function fromCompact(a) {
-    if (a.length !== 10 || a[0] !== 2) return null;
+    if ((a.length !== 10 && a.length !== 12) || a[0] !== 2) return null;
     var lang = a[1], pt = a[2], size = a[3], tier = a[4], low = a[5], high = a[6];
     var cur = a[7], basis = a[8], date = a[9];
     if (lang !== "hu" && lang !== "en" && lang !== "de") return null;
@@ -181,7 +189,7 @@
     if (basis !== "l" && basis !== "t" && basis !== "") return null;
     var s = sizeText(size, pt, t);
     if (!s) return null;
-    return {
+    var out = {
       lang: lang,
       job_type: t.jobs[pt],
       size: s,
@@ -190,6 +198,12 @@
       submitted_at: typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
       basis: basis === "l" ? "labour" : basis === "t" ? "turnkey" : null
     };
+    if (a.length === 12) {
+      var oLow = a[10], oHigh = a[11];
+      if (!isAmount(oLow) || !isAmount(oHigh) || oLow > oHigh) return null;
+      out.option = money(oLow, cur) + " – " + money(oHigh, cur);
+    }
+    return out;
   }
 
   // base64url -> bytes -> strict UTF-8 -> JSON -> validated object, or null.
@@ -271,6 +285,16 @@
     var note = o.basis === "labour" ? t.basisLabour : o.basis === "turnkey" ? t.basisTurnkey : null;
     if (note) price.appendChild(el("span", "price-note", note));
     card.appendChild(price);
+
+    // The optional extra sits under the price band, quieter than it, so the
+    // headline stays the price and this reads as a choice.
+    if (isText(o.option, 80)) {
+      var opt = el("div", "option");
+      opt.appendChild(el("span", "option-label", t.optionLabel));
+      opt.appendChild(el("span", "option-value", "+ " + o.option));
+      opt.appendChild(el("span", "option-note", t.optionNote));
+      card.appendChild(opt);
+    }
 
     card.appendChild(el("p", "disclaimer", t.disclaimer));
     card.appendChild(contactLine(t));

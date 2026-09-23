@@ -556,7 +556,16 @@ function withRegion(quote, postal) {
         low: round1000(i.low * mult),
         high: round1000(i.high * mult),
     }));
-    return finalize(items, quote.area);
+    const out = finalize(items, quote.area);
+    if (quote.options) {
+        out.options = quote.options.map((o) => ({
+            key: o.key,
+            amount: round1000(o.amount * mult),
+            low: round1000(o.low * mult),
+            high: round1000(o.high * mult),
+        }));
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -790,9 +799,16 @@ function buildBathroom(sel, cur = "huf") {
     B.add("hulladek_es_leszerelt_szaniterek_osszegyujte");
 
     // --- Víz- és csatornaszerelés ---
-    B.add("mosdo_hideg_melegviz_es_csatornakiallas_kial");
-    if (hasShower) B.add("hideg_es_melegviz_kiallas_kialakitasa_zuhany");
-    if (hasBath) B.add("hideg_es_melegviz_kiallas_kialakitasa_kadcsa");
+    // Forming new water and waste stub-outs is only unavoidable when the fixtures
+    // MOVE. If the layout stays, the existing pipework is normally reused, so a
+    // complete re-pipe is the customer's choice, not a given (NM Bau, 2026-09-20)
+    // - quoting one regardless added ~250 000 Ft to the headline and put people
+    // off. Same rates, same items; they simply move OUT of the total and in front
+    // of the customer as a named option.
+    const R = moved ? B : new Bill(cur);
+    R.add("mosdo_hideg_melegviz_es_csatornakiallas_kial");
+    if (hasShower) R.add("hideg_es_melegviz_kiallas_kialakitasa_zuhany");
+    if (hasBath) R.add("hideg_es_melegviz_kiallas_kialakitasa_kadcsa");
     // "Alapszerelés" and "beépítés/felszerelés" are separate jobs, and a WC needs
     // both (Milán, 2026-09-08): the rough-in forms the waste pipe and the cold
     // feed, the fitting puts the ceramic on it. Priced as a pair either way -
@@ -800,7 +816,7 @@ function buildBathroom(sel, cur = "huf") {
     B.add(concealedWc ? "wc_allvany_beepitese_es_bekotese" : "monoblokkos_tartalyos_wc_alapszerelese_hideg");
     if (hasShower) B.add("zuhanytalca_beepitese_es_bekotese");
     if (hasBath) B.add("kad_beepitese_es_bekotese");
-    B.add("mosogep_hidegviz_es_csatornakiallas_kialakit");
+    R.add("mosogep_hidegviz_es_csatornakiallas_kialakit");
     // Moving the layout means re-routing the supply, not just reconnecting it.
     if (moved) B.add("kad_zuhany_vizvezetek_athelyezese_megtoldasa");
     if (tier === "premium") B.add("egymedences_mosdo_dupla_mosdo_vizvezetek_ath");
@@ -863,7 +879,12 @@ function buildBathroom(sel, cur = "huf") {
     // --- Befejező + kiszállás ---
     B.add("szaniter_szilikonozas_hezagtomites", perimeter * 0.7);
 
-    return finalize(B.toItems(), A, cur);
+    const quote = finalize(B.toItems(), A, cur);
+    if (!moved) {
+        const extra = finalize(R.toItems(), A, cur);
+        if (extra.total > 0) quote.options = [{ key: "repipe", amount: extra.total, low: extra.low, high: extra.high }];
+    }
+    return quote;
 }
 
 // Exported for unit testing the pricing math (no effect in production).
@@ -1951,6 +1972,14 @@ function runningEstimate(sel, lang) {
 // renders them as separate chat bubbles. Numbers come from buildQuote.
 // Customer-facing quote prose, per language. Each returns the three bubbles as
 // an array. Numbers/labels are passed in already formatted/translated.
+// Optional extras a quote can carry: priced from the same price list, named to
+// the customer, and deliberately NOT in the headline total (see buildBathroom).
+const OPTION_LABEL = {
+    hu: { repipe: "Komplett víz- és csatornavezeték-csere" },
+    en: { repipe: "Complete replacement of the water and waste pipes" },
+    de: { repipe: "Kompletter Austausch der Wasser- und Abwasserleitungen" },
+};
+
 const QUOTE_STR = {
     hu: {
         approx: "kb.",
@@ -1962,7 +1991,8 @@ const QUOTE_STR = {
         // NM Bau alanyi adómentes: nincs rá ÁFA, tehát ez a fizetendő összeg.
         basisLabour: "(**ÁFA-mentes** ár - ez a **munkadíj**, az anyag nem tartalmazza)",
         basisTurnkey: "(**ÁFA-mentes** ár, **kulcsrakész**)",
-        inclFurdo: "bontás, víz- és csatornaszerelés, fűtés, vízszigetelés, kőműves munka, burkolás és a szaniterek beépítése - mindez **munkadíjban**",
+        inclFurdo: "bontás, a szaniterek víz- és csatornabekötése, fűtés, vízszigetelés, kőműves munka, burkolás és a szaniterek beépítése - mindez **munkadíjban**",
+        optionRepipe: (low, high) => `**Választható:** komplett víz- és csatornavezeték-csere **+ ${low} – ${high}**. Ha a mostani elrendezés marad, erre általában nincs szükség, ezért a fenti végösszeg nem tartalmazza.`,
         inclOther: "a fenti tételek - anyaggal és munkadíjjal, kulcsrakész kivitelben",
         exclLabour: "**Mit nem tartalmaz?** Az **anyagot**: csempe, járólap, szaniterek (WC, mosdó, kád), csaptelepek, zuhanytálca vagy üvegfal - ezeket Ön vásárolja meg, a kiválasztásban szívesen segítünk. A **festés-glettelést** és a **villanyszerelést** sem: ezeket alvállalkozó végzi, külön árajánlattal.",
         next: (incl, excl) => [
@@ -1986,7 +2016,8 @@ const QUOTE_STR = {
         ].join("\n"),
         basisLabour: "(**VAT-free** price - this is the **labour**, materials not included)",
         basisTurnkey: "(**VAT-free** price, **turnkey**)",
-        inclFurdo: "demolition, plumbing and drainage, heating, waterproofing, masonry, tiling and fitting the sanitaryware - all as **labour**",
+        inclFurdo: "demolition, connecting the sanitaryware to the water and waste pipes, heating, waterproofing, masonry, tiling and fitting the sanitaryware - all as **labour**",
+        optionRepipe: (low, high) => `**Optional:** a complete replacement of the water and waste pipes, **+ ${low} – ${high}**. If the layout stays as it is, this is usually not needed, so the total above does not include it.`,
         inclOther: "the items above - with materials and labour, in turnkey form",
         exclLabour: "**What is not included?** The **materials**: tiles, sanitaryware (WC, basin, bath), taps and the shower tray or glass panel - you buy those yourself, and we're glad to help you choose. Nor **painting and skimming** or **electrical work**: a subcontractor carries those out and quotes them separately.",
         next: (incl, excl) => [
@@ -2010,7 +2041,8 @@ const QUOTE_STR = {
         ].join("\n"),
         basisLabour: "(Preis **ohne MwSt.** - dies ist der **Arbeitslohn**, ohne Material)",
         basisTurnkey: "(Preis **ohne MwSt.**, **schlüsselfertig**)",
-        inclFurdo: "Abbruch, Sanitär- und Abwasserinstallation, Heizung, Abdichtung, Maurerarbeiten, Fliesenarbeiten und Montage der Sanitärobjekte - alles als **Arbeitsleistung**",
+        inclFurdo: "Abbruch, Anschluss der Sanitärobjekte an Wasser und Abwasser, Heizung, Abdichtung, Maurerarbeiten, Fliesenarbeiten und Montage der Sanitärobjekte - alles als **Arbeitsleistung**",
+        optionRepipe: (low, high) => `**Optional:** kompletter Austausch der Wasser- und Abwasserleitungen, **+ ${low} – ${high}**. Wenn die bestehende Anordnung bleibt, ist das in der Regel nicht nötig, daher ist es in der Gesamtsumme oben nicht enthalten.`,
         inclOther: "die obigen Positionen - mit Material und Arbeit, schlüsselfertig",
         exclLabour: "**Was ist nicht enthalten?** Das **Material**: Fliesen, Sanitärobjekte (WC, Waschbecken, Badewanne), Armaturen sowie Duschtasse und Glaswand - diese kaufen Sie selbst, bei der Auswahl beraten wir Sie gerne. Ebenso wenig **Maler- und Spachtelarbeiten** sowie die **Elektroinstallation**: diese führt ein Subunternehmer aus und rechnet sie separat ab.",
         next: (incl, excl) => [
@@ -2037,12 +2069,18 @@ function renderCustomerQuote(quote, sel, lang = "hu", opts = {}) {
         .map(i => `• ${translateItemLabel(i.label, L)} - **${S.approx} ${formatMoney(i.low, cur)} – ${formatMoney(i.high, cur)}**`)
         .join("\n");
 
-    const priceBubble = S.price(
-        sel.name || "", sizeLabel(sel.size, pt, L), lbl("tier", sel.tier, L).toLowerCase(),
-        L === "hu" ? what.toLowerCase() : what, items,
-        formatMoney(quote.low, cur), formatMoney(quote.high, cur),
-        labour ? S.basisLabour : S.basisTurnkey,
-    );
+    const repipe = (quote.options || []).find((o) => o.key === "repipe");
+    const priceBubble = [
+        S.price(
+            sel.name || "", sizeLabel(sel.size, pt, L), lbl("tier", sel.tier, L).toLowerCase(),
+            L === "hu" ? what.toLowerCase() : what, items,
+            formatMoney(quote.low, cur), formatMoney(quote.high, cur),
+            labour ? S.basisLabour : S.basisTurnkey,
+        ),
+        // Named right under the total, so the customer sees both that the price
+        // excludes it and what it would cost if they do want it.
+        ...(repipe && S.optionRepipe ? ["", S.optionRepipe(formatMoney(repipe.low, cur), formatMoney(repipe.high, cur))] : []),
+    ].join("\n");
     // A labour quote MUST name what it leaves out - the customer is buying the
     // tiles and the sanitaryware themselves, and a number that hid that would be
     // the single most misleading thing this widget could say.
@@ -2926,8 +2964,16 @@ async function sendLeadWebhook(sel, quote, lang, meta = {}) {
             // Read-only summary page for this estimate (see buildQuoteLink).
             quote_link: meta.quoteLink || null,
             quote_items: quote.items.map((i) => ({ label: i.label, low: i.low, high: i.high })),
+            // Priced, named, and NOT in quote_low/high - see buildBathroom.
+            quote_options: (quote.options || []).map((o) => ({
+                key: o.key, label: OPTION_LABEL.hu[o.key] || o.key, low: o.low, high: o.high,
+            })),
         };
 
+        // TEMPORARY - debugging the Zoho Flow mapping. REMOVE once verified: this
+        // writes the customer's name, phone and e-mail into the Vercel logs.
+        // One line on purpose, so Vercel keeps it as a single log entry.
+        console.log("[TEMP zoho payload]", JSON.stringify(payload));
         const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -3024,6 +3070,9 @@ function buildQuoteLink(sel, quote, lang, host, transcriptId = null) {
         quote.basis === "labour" ? "l" : quote.basis === "turnkey" ? "t" : "",
         new Date().toISOString().slice(0, 10),
     ];
+    // Optional extra, appended so links without one keep their exact old shape.
+    const repipe = (quote.options || []).find((o) => o.key === "repipe");
+    if (repipe) summary.push(Math.round(repipe.low), Math.round(repipe.high));
     const d = Buffer.from(JSON.stringify(summary), "utf8").toString("base64url");
     const c = typeof transcriptId === "string" && TRANSCRIPT_ID_RE.test(transcriptId) ? `&c=${transcriptId}` : "";
     return `${base}/ajanlat?d=${d}${c}`;
@@ -3217,9 +3266,9 @@ async function finishQuote(sel, history, lang, response, meta = {}) {
 // ---------------------------------------------------------------------------
 // Customer-email headings/words, per language. The owner copy is always Hungarian.
 const EMAIL_STR = {
-    hu: { approx: "kb.", yourQuote: (flow) => `Az Ön árajánlata - NM Bau ${flow}`, intro: (name) => `Kedves ${name || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:`, summaryH: "A felújítás összefoglalása", quoteH: "Kalkulált árajánlat (kulcsrakész, ÁFA-mentes)", quoteHLabour: "Kalkulált árajánlat (munkadíj, ÁFA-mentes)", totalRow: "Becsült végösszeg (kb. sáv)", footnote: "Előzetes, tájékoztató jellegű kalkuláció, kulcsrakész. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.", footnoteLabour: "Előzetes, tájékoztató jellegű kalkuláció. Az összeg a MUNKADÍJ, az anyagot (csempe, szaniter, csaptelep, zuhanykabin) nem tartalmazza - azt Ön vásárolja meg. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után véglegesül.", subject: (low, high) => `Az Ön árajánlata - NM Bau - ${low} – ${high}` },
-    en: { approx: "approx.", yourQuote: (flow) => `Your quote - NM Bau ${flow}`, intro: (name) => `Dear ${name || "Customer"}, thank you for your enquiry. Here is your preliminary quote:`, summaryH: "Renovation summary", quoteH: "Calculated quote (turnkey, VAT-free)", quoteHLabour: "Calculated quote (labour, VAT-free)", totalRow: "Estimated total (approx. range)", footnote: "Preliminary, indicative calculation, turnkey. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey, depending on the chosen materials and the precise technical scope.", footnoteLabour: "Preliminary, indicative calculation. The amount is the LABOUR charge and does not include materials (tiles, sanitaryware, taps, shower enclosure) - you buy those yourself. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey.", subject: (low, high) => `Your quote - NM Bau - ${low} – ${high}` },
-    de: { approx: "ca.", yourQuote: (flow) => `Ihr Angebot - NM Bau ${flow}`, intro: (name) => `Sehr geehrte/r ${name || "Kunde/Kundin"}, vielen Dank für Ihre Anfrage. Hier ist Ihr vorläufiges Angebot:`, summaryH: "Zusammenfassung der Renovierung", quoteH: "Berechnetes Angebot (schlüsselfertig, ohne MwSt.)", quoteHLabour: "Berechnetes Angebot (Arbeitslohn, ohne MwSt.)", totalRow: "Geschätzte Gesamtsumme (ca.-Spanne)", footnote: "Vorläufige, unverbindliche Kalkulation, schlüsselfertig. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.", footnoteLabour: "Vorläufige, unverbindliche Kalkulation. Der Betrag ist der ARBEITSLOHN und enthält kein Material (Fliesen, Sanitärobjekte, Armaturen, Duschabtrennung) - dieses kaufen Sie selbst. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt.", subject: (low, high) => `Ihr Angebot - NM Bau - ${low} – ${high}` },
+    hu: { approx: "kb.", yourQuote: (flow) => `Az Ön árajánlata - NM Bau ${flow}`, intro: (name) => `Kedves ${name || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:`, summaryH: "A felújítás összefoglalása", quoteH: "Kalkulált árajánlat (kulcsrakész, ÁFA-mentes)", quoteHLabour: "Kalkulált árajánlat (munkadíj, ÁFA-mentes)", totalRow: "Becsült végösszeg (kb. sáv)", footnote: "Előzetes, tájékoztató jellegű kalkuláció, kulcsrakész. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.", footnoteLabour: "Előzetes, tájékoztató jellegű kalkuláció. Az összeg a MUNKADÍJ, az anyagot (csempe, szaniter, csaptelep, zuhanykabin) nem tartalmazza - azt Ön vásárolja meg. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után véglegesül.", optionTag: "(választható, nem része a végösszegnek)", subject: (low, high) => `Az Ön árajánlata - NM Bau - ${low} – ${high}` },
+    en: { approx: "approx.", yourQuote: (flow) => `Your quote - NM Bau ${flow}`, intro: (name) => `Dear ${name || "Customer"}, thank you for your enquiry. Here is your preliminary quote:`, summaryH: "Renovation summary", quoteH: "Calculated quote (turnkey, VAT-free)", quoteHLabour: "Calculated quote (labour, VAT-free)", totalRow: "Estimated total (approx. range)", footnote: "Preliminary, indicative calculation, turnkey. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey, depending on the chosen materials and the precise technical scope.", footnoteLabour: "Preliminary, indicative calculation. The amount is the LABOUR charge and does not include materials (tiles, sanitaryware, taps, shower enclosure) - you buy those yourself. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey.", optionTag: "(optional, not part of the total)", subject: (low, high) => `Your quote - NM Bau - ${low} – ${high}` },
+    de: { approx: "ca.", yourQuote: (flow) => `Ihr Angebot - NM Bau ${flow}`, intro: (name) => `Sehr geehrte/r ${name || "Kunde/Kundin"}, vielen Dank für Ihre Anfrage. Hier ist Ihr vorläufiges Angebot:`, summaryH: "Zusammenfassung der Renovierung", quoteH: "Berechnetes Angebot (schlüsselfertig, ohne MwSt.)", quoteHLabour: "Berechnetes Angebot (Arbeitslohn, ohne MwSt.)", totalRow: "Geschätzte Gesamtsumme (ca.-Spanne)", footnote: "Vorläufige, unverbindliche Kalkulation, schlüsselfertig. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.", footnoteLabour: "Vorläufige, unverbindliche Kalkulation. Der Betrag ist der ARBEITSLOHN und enthält kein Material (Fliesen, Sanitärobjekte, Armaturen, Duschabtrennung) - dieses kaufen Sie selbst. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt.", optionTag: "(optional, nicht in der Gesamtsumme)", subject: (low, high) => `Ihr Angebot - NM Bau - ${low} – ${high}` },
 };
 async function sendQuoteEmail(sel, quote, opts = {}) {
     const resendKey = process.env.RESEND_API_KEY;
@@ -3264,6 +3313,9 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         const qc = quote.currency || "huf";
         for (const i of quote.items) lines.push(`${i.label}: kb. ${formatMoney(i.low, qc)} - ${formatMoney(i.high, qc)}`);
         lines.push(`Becsült végösszeg: kb. ${formatMoney(quote.low, qc)} - ${formatMoney(quote.high, qc)}`);
+        for (const o of quote.options || []) {
+            lines.push(`Választható, NINCS a végösszegben - ${OPTION_LABEL.hu[o.key] || o.key}: kb. ${formatMoney(o.low, qc)} - ${formatMoney(o.high, qc)}`);
+        }
         lines.push(`Fajlagos: ~${formatMoney(quote.perM2, qc)}/m² (${quote.basis === "labour" ? "munkadíj, anyag nélkül" : "kulcsrakész"}, ÁFA-mentes)`, "");
         const tText = transcriptText(opts.transcript);
         if (tText) lines.push("TELJES BESZÉLGETÉS", "", tText);
@@ -3277,7 +3329,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         htmlLines.push(`<p><b>A munka (${esc2(flowHu)})</b><br>${summaryPairs(sel, "hu").map(([k, v]) => `${esc2(k)}: ${esc2(v)}`).join("<br>")}</p>`);
         const qc2 = quote.currency || "huf";
         const basisTxt = quote.basis === "labour" ? "munkadíj, anyag nélkül" : "kulcsrakész";
-        htmlLines.push(`<p><b>Kalkuláció (${basisTxt}, ÁFA-mentes)</b><br>${quote.items.map(i => `${esc2(i.label)}: kb. ${formatMoney(i.low, qc2)} - ${formatMoney(i.high, qc2)}`).join("<br>")}<br>Becsült végösszeg: kb. ${formatMoney(quote.low, qc2)} - ${formatMoney(quote.high, qc2)}<br>Fajlagos: ~${formatMoney(quote.perM2, qc2)}/m²</p>`);
+        htmlLines.push(`<p><b>Kalkuláció (${basisTxt}, ÁFA-mentes)</b><br>${quote.items.map(i => `${esc2(i.label)}: kb. ${formatMoney(i.low, qc2)} - ${formatMoney(i.high, qc2)}`).join("<br>")}<br>Becsült végösszeg: kb. ${formatMoney(quote.low, qc2)} - ${formatMoney(quote.high, qc2)}${(quote.options || []).map(o => `<br>Választható, NINCS a végösszegben - ${esc2(OPTION_LABEL.hu[o.key] || o.key)}: kb. ${formatMoney(o.low, qc2)} - ${formatMoney(o.high, qc2)}`).join("")}<br>Fajlagos: ~${formatMoney(quote.perM2, qc2)}/m²</p>`);
         const tHtml = transcriptHtml(opts.transcript);
         if (tHtml) htmlLines.push(`<p><b>Teljes beszélgetés</b></p>${tHtml}`);
         const ownerHtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5">${htmlLines.join("")}</div>`;
@@ -3303,6 +3355,12 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         .map(i => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${esc(translateItemLabel(i.label, elang))}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${E.approx} ${formatMoney(i.low, quote.currency)} – ${formatMoney(i.high, quote.currency)}</td></tr>`)
         .join("");
 
+    // The optional extras sit UNDER the total, greyed, so the total still reads
+    // as the price and the option as a choice.
+    const optionRows = (quote.options || [])
+        .map(o => `<tr><td style="padding:6px 12px;color:#6b7280;font-size:13px">${esc((OPTION_LABEL[elang] || OPTION_LABEL.hu)[o.key] || o.key)} ${esc(E.optionTag)}</td><td style="padding:6px 12px;text-align:right;color:#6b7280;font-size:13px;white-space:nowrap">+ ${E.approx} ${formatMoney(o.low, quote.currency)} – ${formatMoney(o.high, quote.currency)}</td></tr>`)
+        .join("");
+
     const flowDisp = lbl("projectType", sel.projectType || "furdo", elang);
     const heading = E.yourQuote(esc(flowDisp));
     const intro = `<p style="margin:0 0 12px">${esc(E.intro(sel.name))}</p>`;
@@ -3325,6 +3383,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <h3 style="margin:0 0 8px">${esc(quote.basis === "labour" && E.quoteHLabour ? E.quoteHLabour : E.quoteH)}</h3>
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
           <tr><td style="padding:10px 12px;font-weight:bold">${esc(E.totalRow)}</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${E.approx} ${formatMoney(quote.low, quote.currency)} – ${formatMoney(quote.high, quote.currency)}</td></tr>
+          ${optionRows}
         </table>
         <p style="margin:16px 0 0;font-size:12px;color:#6b7280">${esc(quote.basis === "labour" && E.footnoteLabour ? E.footnoteLabour : E.footnote)} ${PHONE}</p>
       </div>

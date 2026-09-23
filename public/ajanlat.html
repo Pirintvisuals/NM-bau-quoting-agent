@@ -67,6 +67,20 @@
     .price-value { display: block; font-size: 24px; font-weight: 700; margin-top: 4px; }
     .price-note { display: block; font-size: 13px; color: #D6D3D1; margin-top: 6px; }
 
+    /* Optional extra: same shape as the price band, but outlined instead of
+       filled, so it reads as a choice next to the price rather than a second one. */
+    .option {
+      margin-top: 10px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--gold);
+      border-radius: 10px;
+      background: #FFFDF7;
+    }
+    .option-label { display: block; font-size: 13px; font-weight: 600; }
+    .option-value { display: block; font-size: 16px; font-weight: 700; margin-top: 2px; }
+    .option-note { display: block; font-size: 12px; color: var(--soft); margin-top: 4px; }
+
     .disclaimer { color: var(--soft); font-size: 13px; margin: 18px 0 0; }
     .contact { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
     .contact a { color: var(--gold-dark); font-weight: 600; text-decoration: none; white-space: nowrap; }

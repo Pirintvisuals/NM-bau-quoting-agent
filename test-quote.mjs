@@ -64,13 +64,16 @@ const renoCases = [
 // are no longer assumed. Previously retightened 2026-09-06, after:
 // painting/skimming and electrical work are subcontracted and no longer priced,
 // and the built tiled shower was replaced by a low-profile tray with a glass wall.
+// Lowered 2026-09-20 for the three "layout stays" cases: forming new water and
+// waste stub-outs is no longer in the total there - it is quoted as a named
+// option instead (q.options), because the existing pipework is normally reused.
 const cases = [
     { name: '4 m², basic, zuhanykabin, keep, no heat',
       sel: { size: 's_3_4', tier: 'basic', washing: 'zuhanykabin', layout: 'marad', heating: 'nem' },
-      total: [1_530_000, 2_070_000], perM2: [440_000, 590_000] },
+      total: [1_310_000, 1_780_000], perM2: [375_000, 510_000], option: 250_000 },
     { name: '6 m², mid, műmárvány zuhanytálca üvegfallal, keep',
       sel: { size: 's_5_6', tier: 'mid', washing: 'zuhany', layout: 'marad', heating: 'nem' },
-      total: [1_850_000, 2_510_000], perM2: [340_000, 460_000] },
+      total: [1_640_000, 2_220_000], perM2: [298_000, 404_000], option: 250_000 },
     { name: '9 m², mid, bath+shower, move, underfloor heat',
       sel: { size: '9', tier: 'mid', washing: 'mindketto', layout: 'athelyez', heating: 'igen' },
       total: [2_560_000, 3_470_000], perM2: [280_000, 390_000] },
@@ -79,7 +82,7 @@ const cases = [
       total: [2_480_000, 3_350_000], perM2: [450_000, 610_000] },
     { name: 'unknown everything (nem_tudom defaults)',
       sel: { size: 'nem_tudom', tier: 'nem_tudom', washing: 'nem_tudom', layout: 'nem_tudom', heating: 'nem_tudom' },
-      total: [1_750_000, 2_370_000], perM2: [350_000, 470_000] },
+      total: [1_538_000, 2_082_000], perM2: [307_000, 417_000], option: 250_000 },
 ];
 
 let failures = 0;
@@ -91,6 +94,14 @@ for (const c of [...cases, ...renoCases]) {
     for (const it of q.items) console.log(`   ${it.label.padEnd(52)} ${fmt(it.amount).padStart(14)}`);
     console.log(`   ${'PONT BECSLÉS'.padEnd(52)} ${fmt(q.total).padStart(14)}`);
     console.log(`   → SÁV: ${fmt(q.low)} – ${fmt(q.high)}   (${fmt(q.perM2)}/m²)`);
+
+    const opt = (q.options || [])[0];
+    if (opt) console.log(`   ${'VÁLASZTHATÓ: ' + opt.key.padEnd(39)} ${fmt(opt.amount).padStart(14)}`);
+    if (c.option != null && (!opt || opt.amount !== c.option)) {
+        failures++;
+        console.log(`   ✗ a választható tétel ${fmt(c.option)} kellene, kapott: ${opt ? fmt(opt.amount) : 'nincs'}`);
+    }
+    if (c.option == null && opt) { failures++; console.log(`   ✗ itt nem kellene választható tétel`); }
 
     const okTotal = inRange(q.total, c.total);
     const okPerM2 = inRange(q.perM2, c.perM2);

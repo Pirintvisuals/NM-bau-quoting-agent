@@ -130,6 +130,31 @@ const bp = { projectType: 'furdo', size: '6', tier: 'mid', washing: 'zuhany', la
 check('Budapest raises the Ft quote', buildQuote(bp).total > q.total, true);
 check('Budapest leaves the EUR quote alone', buildQuote(bp, { currency: 'eur' }).total, qe.total);
 
+console.log('\n■ A complete re-pipe is an OPTION when the layout stays (2026-09-20)');
+{
+    const bath = { projectType: 'furdo', size: '6', tier: 'mid', washing: 'zuhany', heating: 'nem' };
+    const stay = buildQuote({ ...bath, layout: 'marad' });
+    const move = buildQuote({ ...bath, layout: 'athelyez' });
+    const opt = (stay.options || [])[0];
+    check('keeping the layout carries a named option', opt && opt.key, 'repipe');
+    check('moving the layout does not - there it is unavoidable', (move.options || []).length, 0);
+    // Exactly the stub-out rates, nothing invented: basin + shower + washing machine.
+    const roughIn = rate('mosdo_hideg_melegviz_es_csatornakiallas_kial', 'huf')
+        + rate('hideg_es_melegviz_kiallas_kialakitasa_zuhany', 'huf')
+        + rate('mosogep_hidegviz_es_csatornakiallas_kialakit', 'huf');
+    check('the option is exactly those rates', opt.amount, roughIn);
+    check('and it is OUT of the total', stay.items.reduce((s, i) => s + i.amount, 0), stay.total);
+    check('so the headline is lower by that much than it used to be',
+        stay.total + opt.amount, buildQuote({ ...bath, layout: 'marad' }).total + roughIn);
+    // Connecting the sanitaryware is still ours and still in the price.
+    check('the plumbing group still exists', stay.items.some((i) => /csatornaszerelés/.test(i.label)), true);
+    check('an unknown layout is treated as "stays"', (buildQuote({ ...bath, layout: 'nem_tudom' }).options || []).length, 1);
+    // A euro quote prices the option from the Austrian column too.
+    const eur = buildQuote({ ...bath, layout: 'marad' }, { currency: 'eur' });
+    check('the euro quote carries the option as well', (eur.options || []).length, 1);
+    check('...priced in euros', eur.options[0].amount < 2000, true);
+}
+
 console.log('\n■ The options actually move the price');
 const base = { projectType: 'furdo', size: '6', tier: 'mid', washing: 'zuhany', layout: 'marad' };
 const t = (o) => buildQuote({ ...base, ...o }).total;
