@@ -44,6 +44,8 @@
       size: "Méret",
       tier: "Kivitelezési szint",
       price: "Becsült ár",
+      priceFloor: "Induló ár",
+      floorAmount: function (m) { return m + "-tól"; },
       basisLabour: "ÁFA-mentes ár – ez a munkadíj, az anyagot nem tartalmazza.",
       basisTurnkey: "ÁFA-mentes ár, kulcsrakész kivitelben.",
       disclaimer: "Ez egy tájékoztató becslés – a végleges árat az ingyenes helyszíni felmérés után rögzítjük, a választott anyagok és a pontos műszaki tartalom függvényében.",
@@ -72,6 +74,8 @@
       size: "Size",
       tier: "Finish level",
       price: "Estimated price",
+      priceFloor: "Starting price",
+      floorAmount: function (m) { return "from " + m; },
       basisLabour: "VAT-free price – this is the labour; materials are not included.",
       basisTurnkey: "VAT-free price, turnkey.",
       disclaimer: "This is an indicative estimate – the final price is set after the free on-site survey, depending on the chosen materials and the exact scope of work.",
@@ -100,6 +104,8 @@
       size: "Größe",
       tier: "Ausstattungsniveau",
       price: "Geschätzter Preis",
+      priceFloor: "Einstiegspreis",
+      floorAmount: function (m) { return "ab " + m; },
       basisLabour: "Preis ohne MwSt. – dies ist der Arbeitslohn, ohne Material.",
       basisTurnkey: "Preis ohne MwSt., schlüsselfertig.",
       disclaimer: "Dies ist eine Richtschätzung – der endgültige Preis wird nach der kostenlosen Vor-Ort-Besichtigung festgelegt, abhängig von den gewählten Materialien und dem genauen Leistungsumfang.",
@@ -174,9 +180,13 @@
   }
 
   // Version 2: [2, lang, projectType, size, tier, low, high, currency, basis, date]
-  // plus, when the quote has one, [optionLow, optionHigh] for the named extra.
+  // plus, when the quote has one, [optionLow, optionHigh] for the named extra,
+  // plus a trailing "f" when the customer answered "Nem tudom" somewhere and
+  // was shown a starting price instead of a range.
   // -> the same summary object the first link format carried, or null.
   function fromCompact(a) {
+    var floor = a[a.length - 1] === "f";
+    if (floor) a = a.slice(0, -1);
     if ((a.length !== 10 && a.length !== 12) || a[0] !== 2) return null;
     var lang = a[1], pt = a[2], size = a[3], tier = a[4], low = a[5], high = a[6];
     var cur = a[7], basis = a[8], date = a[9];
@@ -194,7 +204,8 @@
       job_type: t.jobs[pt],
       size: s,
       tier: tier === "" ? "-" : t.tiers[tier],
-      quote_formatted: money(low, cur) + " – " + money(high, cur),
+      quote_formatted: floor ? t.floorAmount(money(low, cur)) : money(low, cur) + " – " + money(high, cur),
+      floor: floor,
       submitted_at: typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
       basis: basis === "l" ? "labour" : basis === "t" ? "turnkey" : null
     };
@@ -280,7 +291,7 @@
     card.appendChild(facts);
 
     var price = el("div", "price");
-    price.appendChild(el("span", "price-label", t.price));
+    price.appendChild(el("span", "price-label", o.floor ? t.priceFloor : t.price));
     price.appendChild(el("span", "price-value", o.quote_formatted));
     var note = o.basis === "labour" ? t.basisLabour : o.basis === "turnkey" ? t.basisTurnkey : null;
     if (note) price.appendChild(el("span", "price-note", note));

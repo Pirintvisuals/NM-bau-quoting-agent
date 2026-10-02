@@ -11,7 +11,7 @@ let fail = 0;
 let longest = 0;
 
 for (const lang of ["hu", "en", "de"]) {
-    for (const projectType of ["furdo", "konyha", "lakas", "haz", "szoba"]) {
+    for (const projectType of ["furdo", "lakas", "haz", "szoba"]) {
         for (const size of ["s_3_4", "s_11p", "nem_tudom", "999,5", "120 m2", "", null]) {
             for (const tier of ["basic", "premium", "nem_tudom", null]) {
                 const sel = { projectType, size, tier, name: "Teszt Elek", email: "teszt@example.com", phone: "+36 30 000 0000" };
@@ -29,7 +29,10 @@ for (const lang of ["hu", "en", "de"]) {
                 longest = Math.max(longest, link.length);
                 const problems = [];
                 if (link.length > LIMIT) problems.push(`${link.length} karakter`);
-                if (!Array.isArray(a) || a.length !== 12 || a[0] !== 2) problems.push("rossz formátum");
+                // A "Nem tudom" anywhere adds the trailing starting-price flag.
+                const floor = tier === "nem_tudom" || size === "nem_tudom";
+                if (!Array.isArray(a) || a.length !== (floor ? 13 : 12) || a[0] !== 2) problems.push("rossz formátum");
+                if (floor && a[12] !== "f") problems.push("hiányzik az induló ár jelzés");
                 if (url.searchParams.get("c") !== CHAT_ID) problems.push("hiányzik a beszélgetés azonosítója");
                 if (/Teszt|example|000 0000/.test(link + JSON.stringify(a))) problems.push("személyes adat a linkben");
                 if (problems.length) {

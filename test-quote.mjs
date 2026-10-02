@@ -11,44 +11,42 @@ import { buildQuote } from './api/faq-agent.js';
 const fmt = (n) => Math.round(n).toLocaleString('hu-HU') + ' Ft';
 
 // Whole-property scenarios. Envelopes are the published 2025–2026 turnkey ranges
-// (Daibau full 135–275k Ft/m², 65 m² ~8,8–17,9 M; kozmetikai 30–60k/m²; konyha
-// 0,8–2,7 M; tető/homlokzat/térkő per the trade pages). perM2 only sanity-checked
-// where it's meaningful (full flat/house); kitchen/room bound by total instead.
+// (Daibau full 135–275k Ft/m², 65 m² ~8,8–17,9 M; kozmetikai 30–60k/m²;
+// tető/homlokzat/térkő per the trade pages), MINUS the kitchen: since 2026-09-23
+// NM Bau quotes a kitchen individually, so no flat/house total includes cabinets
+// or a worktop any more. perM2 only sanity-checked where it's meaningful.
 const renoCases = [
     // ESSENTIAL-ONLY ballpark (no refine): the realistic MIDDLE scope is the default
     // a "közepes" customer lands on - should feel sensible, not alarming.
-    { name: 'LAKÁS 60 m², közepes, RÉSZLEGES, 1 fürdő, új konyha (csak alapkérdések)',
-      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj' },
+    { name: 'LAKÁS 60 m², közepes, RÉSZLEGES, 1 fürdő (csak alapkérdések)',
+      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1' },
       total: [6_200_000, 8_200_000], perM2: [100_000, 140_000] },
     // Same flat, but customer REFINED: added windows + radiator + walls + condition.
     { name: 'LAKÁS 60 m², közepes, RÉSZLEGES + pontosítva (falak, lakott, ablak, radiátor)',
-      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj',
+      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1',
              walls: 'igen', condition: 'lakott', floortile: 'fele_fele', windows: 'csere', heatingsys: 'radiator', klima: 'nem' },
       total: [7_400_000, 9_800_000], perM2: [120_000, 165_000] },
-    { name: 'LAKÁS 80 m², prémium, TELJES, 2 fürdő, új konyha, ablak, hőszivattyú, klíma',
-      sel: { projectType: 'lakas', size: '80', tier: 'premium', scope: 'teljes', bathrooms: '2', kitchen: 'uj',
+    { name: 'LAKÁS 80 m², prémium, TELJES, 2 fürdő, ablak, hőszivattyú, klíma',
+      sel: { projectType: 'lakas', size: '80', tier: 'premium', scope: 'teljes', bathrooms: '2',
              walls: 'igen', condition: 'lakott', floortile: 'tobb_csempe', windows: 'csere', heatingsys: 'hoszivattyu', klima: 'igen' },
       total: [24_000_000, 31_000_000], perM2: [300_000, 390_000] },
-    { name: 'LAKÁS 50 m², alap, KOZMETIKAI, 1 fürdő, konyha nem (csak alapkérdések)',
-      sel: { projectType: 'lakas', size: '50', tier: 'basic', scope: 'kozmetikai', bathrooms: '1', kitchen: 'nem' },
+    { name: 'LAKÁS 50 m², alap, KOZMETIKAI, 1 fürdő (csak alapkérdések)',
+      sel: { projectType: 'lakas', size: '50', tier: 'basic', scope: 'kozmetikai', bathrooms: '1' },
       total: [1_700_000, 2_600_000], perM2: [33_000, 55_000] },
-    { name: 'HÁZ 110 m², közepes, TELJES + pontosítva, 2 fürdő, új konyha, ablak, radiátor',
-      sel: { projectType: 'haz', size: '110', tier: 'mid', scope: 'teljes', bathrooms: '2', kitchen: 'uj',
+    { name: 'HÁZ 110 m², közepes, TELJES + pontosítva, 2 fürdő, ablak, radiátor',
+      sel: { projectType: 'haz', size: '110', tier: 'mid', scope: 'teljes', bathrooms: '2',
              walls: 'nem', condition: 'lakott', floortile: 'fele_fele', windows: 'csere', heatingsys: 'radiator', klima: 'nem' },
       total: [16_000_000, 21_000_000], perM2: [140_000, 195_000] },
-    { name: 'KONYHA 10 m², közepes, bútorral (4–5 fm), gépekkel, marad',
-      sel: { projectType: 'konyha', size: '10', tier: 'mid', furniture: 'igen', kitchen_fm: 'fm_4_5', appliances: 'igen', layout: 'marad' },
-      total: [1_700_000, 2_400_000], perM2: [160_000, 250_000] },
     { name: 'SZOBA 15 m², közepes, teljes',
       sel: { projectType: 'szoba', size: '15', tier: 'mid', roomscope: 'teljes' },
       total: [600_000, 1_000_000], perM2: [40_000, 70_000] },
     // Regional index: same Budapest flat should land ~8% over the same job rural.
-    { name: 'LAKÁS 60 m² Budapest (1011) - közepes, részleges, új konyha',
-      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '1011' },
-      total: [6_800_000, 8_800_000], perM2: [110_000, 150_000] },
-    { name: 'LAKÁS 60 m² vidék (4032 Debrecen) - közepes, részleges, új konyha',
-      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', kitchen: 'uj', postal_code: '4032' },
-      total: [5_900_000, 7_700_000], perM2: [95_000, 130_000] },
+    { name: 'LAKÁS 60 m² Budapest (1011) - közepes, részleges',
+      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', postal_code: '1011' },
+      total: [6_000_000, 8_000_000], perM2: [100_000, 145_000] },
+    { name: 'LAKÁS 60 m² vidék (4032 Debrecen) - közepes, részleges',
+      sel: { projectType: 'lakas', size: '60', tier: 'mid', scope: 'reszleges', bathrooms: '1', postal_code: '4032' },
+      total: [5_200_000, 7_000_000], perM2: [88_000, 125_000] },
 ];
 
 // CHANGED 2026-09-04: the bathroom flow is now assembled from the real NM Bau

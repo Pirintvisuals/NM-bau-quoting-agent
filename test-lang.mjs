@@ -47,7 +47,7 @@ console.log('\n■ Clicked chips - exact strings we generated, so exactly known'
 [
     ['Fürdőszoba', 'hu'], ['Teljes lakás', 'hu'], ['Nem tudom', 'hu'], ['Kérek padlófűtést', 'hu'],
     ['Bathroom', 'en'], ['Whole flat', 'en'], ['Not sure', 'en'], ['Mid-range', 'en'],
-    ['Badezimmer', 'de'], ['Weiß nicht', 'de'], ['Küche', 'de'],
+    ['Badezimmer', 'de'], ['Weiß nicht', 'de'], ['Ganze Wohnung', 'de'],
 ].forEach(([t, want]) => check(JSON.stringify(t), detectMessageLang(t), want));
 
 console.log('\n■ Chips whose label is identical in several languages - no signal');

@@ -148,22 +148,16 @@ const RENO = {
     underfloorPerM2: 10500,   // vizes padlófűtés rendszer, /m²
     underfloorFixed: 180000,  // osztó-gyűjtő + bekötés
     heatpumpSystem:  4600000, // komplett levegő-víz hőszivattyús rendszer (belső elosztással): ~2,7M egység + 0,6–1,2M szerelés + 0,3–0,8M kiegészítők
-    // Kitchen (konyha) module. Cabinets + worktop priced per FOLYÓMÉTER (running
-    // metre) - the accurate driver - instead of floor m². A typical kitchen ≈ 4 fm.
-    kitchen: {
-        base:          { basic: 33000, mid: 49000, premium: 75000 }, // /m²: csempe, gépészet/villany kiállás, padló, festés
-        furniturePerM: { basic: 130000, mid: 205000, premium: 390000 }, // konyhabútor /folyóméter
-        countertopPerM:{ basic: 14000,  mid: 26000,  premium: 52000 },  // munkalap /folyóméter
-        appliances:    { basic: 290000, mid: 440000, premium: 750000 },
-        moveExtra:     180000, // víz/gáz/villany áthelyezés új elrendezésnél
-        fixed:         75000,
-    },
-    band:      { low: 0.90, high: 1.12 }, // lakás / konyha / szoba sáv
+    // KITCHEN REMOVED 2026-09-23: NM Bau prices a kitchen individually after the
+    // survey - cabinets and worktops are bought, not built - so the widget must
+    // not put a number on one. Gone from the project-type menu AND from the
+    // flat/house total; git history holds the old per-folyóméter rates.
+    band:      { low: 0.90, high: 1.12 }, // lakás / szoba sáv
     bandHouse: { low: 0.85, high: 1.15 }, // ház: nagyobb projekt, szélesebb sáv
 };
 
 // Representative floor area (m²) when the customer doesn't give one, per type.
-const TYPE_DEFAULT_AREA = { furdo: 5, lakas: 60, haz: 110, konyha: 9, szoba: 15 };
+const TYPE_DEFAULT_AREA = { furdo: 5, lakas: 60, haz: 110, szoba: 15 };
 const FLOW_LABEL = {
     furdo: "Fürdőszoba-felújítás", konyha: "Konyhafelújítás", lakas: "Teljes lakásfelújítás",
     haz: "Családi ház felújítás", szoba: "Szobafelújítás",
@@ -618,12 +612,7 @@ function buildFullReno(sel, pt) {
     const baths = bathCount(sel.bathrooms);
     add(`Fürdőszoba/WC szaniter és vízszigetelés (${baths} db)`, RENO.bathroomFitout[tier] * baths, "bathroom");
 
-    // New kitchen furniture + worktop (a konyha gépészete/villanya a héjban van).
     // Flat/house flow doesn't ask cabinet length, so assume a typical ~4 fm run.
-    if (sel.kitchen === "uj") {
-        const k = RENO.kitchen;
-        add("Konyhabútor és munkalap (vízkiállás-igazítással)", (k.furniturePerM[tier] + k.countertopPerM[tier]) * 4, "kitchen");
-    }
 
     // REFINE - window replacement (becsült darabszám az alapterületből).
     if (sel.windows === "csere") {
@@ -641,31 +630,6 @@ function buildFullReno(sel, pt) {
 
     return finalize(items, A);
 }
-
-// ---------------------------------------------------------------------------
-//  Kitchen as its own project (konyha).
-// ---------------------------------------------------------------------------
-function buildKitchen(sel) {
-    const A = areaOfType(sel.size, "konyha");
-    const tier = validTier(sel.tier);
-    const k = RENO.kitchen;
-    const items = [];
-    const add = (label, huf, kind) => { if (huf > 0) items.push(makeItem(label, huf, kind)); };
-
-    add("Bontás, burkolás, gépészet- és villanykiállás, padló, festés", k.base[tier] * A + k.fixed, "shell");
-    if (sel.furniture === "igen") {
-        // Cabinets + worktop scale with RUNNING METRES (folyóméter), the accurate
-        // driver - not floor m². Unknown → ~4 fm (a typical kitchen run).
-        const fm = KITCHEN_FM_METRES[sel.kitchen_fm] || 4;
-        add(`Konyhabútor és munkalap (${String(fm).replace(".", ",")} fm)`, (k.furniturePerM[tier] + k.countertopPerM[tier]) * fm, "kitchen");
-    }
-    if (sel.appliances === "igen") add("Beépített gépek (sütő, főzőlap, páraelszívó stb.)", k.appliances[tier], "kitchen");
-    if (sel.layout === "athelyez") add("Víz/gáz/villany pontok áthelyezése (vízkiállás)", k.moveExtra, "plumbing");
-
-    return finalize(items, A);
-}
-// Kitchen cabinet run length (folyóméter) per stored token.
-const KITCHEN_FM_METRES = { fm_2_3: 2.5, fm_3_4: 3.5, fm_4_5: 4.5, fm_5_6: 5.5, fm_6p: 7, nem_tudom: 4 };
 
 // ---------------------------------------------------------------------------
 //  Single room / space (szoba). roomscope: festes | festes_padlo | teljes.
@@ -707,7 +671,6 @@ function buildQuote(sel, opts) {
     const pt = sel && sel.projectType;
     let q;
     if (pt === "lakas" || pt === "haz") q = convertQuote(buildFullReno(sel, pt), cur, "turnkey");
-    else if (pt === "konyha") q = convertQuote(buildKitchen(sel), cur, "turnkey");
     else if (pt === "szoba") q = convertQuote(buildRoom(sel), cur, "turnkey");
     else { q = buildBathroom(sel, cur); q.basis = "labour"; }
     // The regional index is a HUNGARIAN labour-market adjustment (Budapest vs
@@ -888,7 +851,7 @@ function buildBathroom(sel, cur = "huf") {
 }
 
 // Exported for unit testing the pricing math (no effect in production).
-export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildKitchen, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget, buildQuoteLink, transcriptMessages };
+export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget, buildQuoteLink, transcriptMessages };
 
 // ---------------------------------------------------------------------------
 //  FLOW CONFIG - every project type asks its OWN question set. The backend drives
@@ -908,10 +871,8 @@ function projectFields(pt, sel = {}) {
         // (2026-09-06) - a low-profile tray sits on the same floor as everything
         // else, so underfloor heating is on the table again for every option.
         case "furdo":  return ["size", "tier", "washing", "layout", "heating"];
-        case "lakas":  return ["size", "scope", "tier", "bathrooms", "kitchen"];
-        case "haz":    return ["size", "scope", "tier", "bathrooms", "kitchen"];
-        case "konyha": return ["size", "tier", "furniture",
-            ...(sel.furniture === "igen" ? ["kitchen_fm"] : []), "appliances", "layout"];
+        case "lakas":  return ["size", "scope", "tier", "bathrooms"];
+        case "haz":    return ["size", "scope", "tier", "bathrooms"];
         case "szoba":  return ["size", "roomscope", "tier"];
         default:       return [];
     }
@@ -1037,7 +998,6 @@ function budgetBandsFor(sel, lang = "hu") {
         w.range(budgetText(t2, cur), budgetText(t3, cur), u),
         w.over(budgetText(t3, cur), u),
         w.unsure,
-        w.skip, // the question is optional - always offer a way out
     ];
     const mul = cur === "eur" ? 1 : 1e6;
     return { adaptive: true, chips, thresholds: [t1 * mul, t2 * mul, t3 * mul] };
@@ -1052,10 +1012,11 @@ function resolveBudget(answer, sel, lang = "hu") {
     const b = budgetBandsFor(sel, lang);
     const hit = b.chips.find((c) => c.toLowerCase() === a.toLowerCase());
     if (hit) return hit; // store the (localized) band label the customer picked
-    // The question is optional: any way of declining counts as an answer, so the
-    // quote is never blocked by it.
+    // The budget is required since 2026-09-23 (Milán): declining is no longer an
+    // answer, so the field stays pending and the bot asks again. "Még nem tudom"
+    // still counts - not knowing is different from not saying.
     if (/ink[aá]bb nem|nem mondan[aá]m|nem szeretn[eé]m megadni|rather not|lieber nicht|keine angabe|skip|kihagy/i.test(a)) {
-        return BUDGET_WORDS[normLang(lang)].skip;
+        return null;
     }
     // "Not sure" in any of the three languages -> the localized unsure label.
     if (/m[eé]g nem tud|nem tudom|not sure|wei(ß|ss) (noch )?nicht/i.test(a)) return BUDGET_WORDS[normLang(lang)].unsure;
@@ -1074,7 +1035,7 @@ function resolveBudget(answer, sel, lang = "hu") {
 
 // Quick-reply chip labels per fixed-choice field.
 const CHIP_LABELS = {
-    projectType: ["Fürdőszoba", "Konyha", "Teljes lakás", "Családi ház", "Egy szoba"],
+    projectType: ["Fürdőszoba", "Teljes lakás", "Családi ház", "Egy szoba"],
     tier: ["Alap / takarékos", "Közepes", "Prémium", "Nem tudom"],
     washing: ["Műmárvány zuhanytálca (üvegfallal)", "Zuhanykabin", "Kád", "Kád és zuhany", "Nem tudom"],
     layout: ["Marad a mostani elrendezés", "Áthelyezzük", "Nem tudom"],
@@ -1082,12 +1043,8 @@ const CHIP_LABELS = {
     scope: ["Teljes (mindent cserélünk)", "Részleges (felületek + néhány szakág)", "Kozmetikai (festés, burkolat)", "Nem tudom"],
     roomscope: ["Csak festés", "Festés + új padló", "Teljes felújítás", "Nem tudom"],
     bathrooms: ["1 fürdő/WC", "2 fürdő/WC", "3 vagy több", "Nem tudom"],
-    kitchen: ["Új konyhabútorral", "Felújítás bútor nélkül", "Konyhát nem érinti", "Nem tudom"],
     windows: ["Igen, ablakcsere kell", "Nem, maradnak", "Nem tudom"],
     heatingsys: ["Marad a mostani", "Radiátorcsere", "Padlófűtés", "Hőszivattyús rendszer", "Nem tudom"],
-    furniture: ["Igen, új bútor kell", "Nem, marad", "Nem tudom"],
-    kitchen_fm: ["2–3 fm", "3–4 fm", "4–5 fm", "5–6 fm", "6 fm felett", "Nem tudom"],
-    appliances: ["Igen, gépekkel", "Nem, saját gépek", "Nem tudom"],
     timeline: ["Amint lehet", "Egy hónapon belül", "Fél éven belül", "Még idén", "Még nem tudom"],
     // --- Refine stage ---
     refine_gate: ["Igen, pontosítsuk", "Most nem, köszönöm"],
@@ -1103,20 +1060,18 @@ const SIZE_CHIPS = {
     furdo:  ["3–4 m²", "5–6 m²", "7–8 m²", "9–10 m²", "10 m² felett", "Nem tudom"],
     lakas:  ["40 m² alatt", "40–60 m²", "60–80 m²", "80–120 m²", "120 m² felett", "Nem tudom"],
     haz:    ["80 m² alatt", "80–120 m²", "120–160 m²", "160 m² felett", "Nem tudom"],
-    konyha: ["6 m² alatt", "6–10 m²", "10–15 m²", "15 m² felett", "Nem tudom"],
     szoba:  ["10 m² alatt", "10–15 m²", "15–20 m²", "20 m² felett", "Nem tudom"],
 };
 const SIZE_VALUES = {
     furdo:  { "3–4 m²": "s_3_4", "5–6 m²": "s_5_6", "7–8 m²": "s_7_8", "9–10 m²": "s_9_10", "10 m² felett": "s_11p", "nem tudom": "nem_tudom" },
     lakas:  { "40 m² alatt": "35", "40–60 m²": "50", "60–80 m²": "70", "80–120 m²": "100", "120 m² felett": "150", "nem tudom": "nem_tudom" },
     haz:    { "80 m² alatt": "70", "80–120 m²": "100", "120–160 m²": "140", "160 m² felett": "200", "nem tudom": "nem_tudom" },
-    konyha: { "6 m² alatt": "5", "6–10 m²": "8", "10–15 m²": "12", "15 m² felett": "18", "nem tudom": "nem_tudom" },
     szoba:  { "10 m² alatt": "8", "10–15 m²": "12", "15–20 m²": "17", "20 m² felett": "25", "nem tudom": "nem_tudom" },
 };
 
 // Chip label -> canonical value, for the fixed-choice fields.
 const CHOICE_VALUES = {
-    projectType: { "fürdőszoba": "furdo", "konyha": "konyha", "teljes lakás": "lakas", "családi ház": "haz", "egy szoba": "szoba" },
+    projectType: { "fürdőszoba": "furdo", "teljes lakás": "lakas", "családi ház": "haz", "egy szoba": "szoba" },
     tier: { "alap / takarékos": "basic", "közepes": "mid", "prémium": "premium", "nem tudom": "nem_tudom" },
     washing: { "műmárvány zuhanytálca (üvegfallal)": "zuhany", "zuhanykabin": "zuhanykabin", "kád": "kad", "kád és zuhany": "mindketto", "nem tudom": "nem_tudom" },
     layout: { "marad a mostani elrendezés": "marad", "áthelyezzük": "athelyez", "nem tudom": "nem_tudom" },
@@ -1124,12 +1079,8 @@ const CHOICE_VALUES = {
     scope: { "teljes (mindent cserélünk)": "teljes", "részleges (felületek + néhány szakág)": "reszleges", "kozmetikai (festés, burkolat)": "kozmetikai", "nem tudom": "nem_tudom" },
     roomscope: { "csak festés": "festes", "festés + új padló": "festes_padlo", "teljes felújítás": "teljes", "nem tudom": "nem_tudom" },
     bathrooms: { "1 fürdő/wc": "1", "2 fürdő/wc": "2", "3 vagy több": "3p", "nem tudom": "nem_tudom" },
-    kitchen: { "új konyhabútorral": "uj", "felújítás bútor nélkül": "felujitas", "konyhát nem érinti": "nem", "nem tudom": "nem_tudom" },
     windows: { "igen, ablakcsere kell": "csere", "nem, maradnak": "marad", "nem tudom": "nem_tudom" },
     heatingsys: { "marad a mostani": "marad", "radiátorcsere": "radiator", "padlófűtés": "padlofutes", "hőszivattyús rendszer": "hoszivattyu", "nem tudom": "nem_tudom" },
-    furniture: { "igen, új bútor kell": "igen", "nem, marad": "nem", "nem tudom": "nem_tudom" },
-    kitchen_fm: { "2–3 fm": "fm_2_3", "3–4 fm": "fm_3_4", "4–5 fm": "fm_4_5", "5–6 fm": "fm_5_6", "6 fm felett": "fm_6p", "nem tudom": "nem_tudom" },
-    appliances: { "igen, gépekkel": "igen", "nem, saját gépek": "nem", "nem tudom": "nem_tudom" },
     timeline: { "amint lehet": "t_asap", "egy hónapon belül": "t_month", "fél éven belül": "t_halfyear", "még idén": "t_thisyear", "még nem tudom": "t_unsure" },
     // --- Refine stage ---
     refine_gate: { "igen, pontosítsuk": "yes", "most nem, köszönöm": "no" },
@@ -1266,6 +1217,114 @@ function mapAnswer(field, answer, sel, lang = "hu") {
     return null;
 }
 
+// ---------------------------------------------------------------------------
+//  FIXED QUESTION TEXT - the fast path for button clicks
+//  A clicked chip is an exact, known answer: the backend maps it and knows the
+//  next question before any model is involved. Waiting 1-3 s for the model to
+//  rephrase the same question, eight times in a row, bought nothing, so a
+//  click is answered from these texts instantly. Typed answers still go to the
+//  model, because those can carry a question or need interpreting.
+//  Same wording as the SYSTEM_PROMPT flow. A field missing here falls back to
+//  the model.
+// ---------------------------------------------------------------------------
+const ASK_ANYTIME = {
+    hu: "Közben bármit kérdezhet is.",
+    en: "Feel free to ask anything along the way.",
+    de: "Sie können zwischendurch jederzeit Fragen stellen.",
+};
+const QUESTION_TEXT = {
+    hu: {
+        size: {
+            furdo: "**Körülbelül hány négyzetméteres a fürdőszoba?**\nVálasszon a gombok közül, vagy írja be a számot.",
+            lakas: "**Mekkora a lakás alapterülete (m²)?**\nVálasszon a gombok közül, vagy írja be a számot.",
+            haz: "**Mekkora a ház alapterülete (m²)?**\nVálasszon a gombok közül, vagy írja be a számot.",
+            szoba: "**Hány négyzetméteres a helyiség?**\nVálasszon a gombok közül, vagy írja be a számot.",
+        },
+        tier: "**Milyen kivitelezési szintet szeretne?**",
+        washing: "**Zuhanyzót vagy kádat szeretne?**\n• **Műmárvány zuhanytálca** - alacsony peremű, üvegfallal\n• **Zuhanykabin** - kész, komplett\n• **Kád**\n• **Kád és zuhany**",
+        layout: "**Marad a mostani elrendezés, vagy áthelyeznénk a vizes pontokat?**\n(Vizes pont: ahol a WC, a mosdó, a zuhany vagy a kád bekötése van.)",
+        heating: "**Szeretne elektromos padlófűtést?**\n(Csempe alá fektetett fűtőszőnyeg - kellemesen meleg padló.)",
+        scope: "**Milyen mély felújítás kell?**\n• **Teljes** - mindent cserélünk (csövek, villany, falak is)\n• **Részleges** - új felületek, burkolat, festés + néhány szakág\n• **Kozmetikai** - főleg festés és új burkolat",
+        roomscope: "**Mit szeretne a szobával?**\n• **Csak festés**\n• **Festés + új padló**\n• **Teljes felújítás** - festés, padló, villany, ajtó",
+        bathrooms: "**Hány fürdőszoba/WC van az ingatlanban?**",
+        timeline: "**Mikorra szeretné a kivitelezést?**",
+        refine_gate: "Megvan az **előzetes ár**!\n**Szeretné pontosítani néhány gyors kérdéssel?** Így szűkebb, pontosabb sávot kap.",
+        walls: "**Mozgatunk vagy építünk falakat, áthelyezünk vizes pontokat (WC, mosdó, konyha)?**",
+        condition: "**Milyen most az ingatlan állapota?**\n• **Új építésű** - 15 évnél nem öregebb\n• **Felújítandó** - 20 évnél öregebb\n• **Régi, elhasználódott** - 30+ év",
+        floortile: "**A padló nagyrészt csempe vagy laminált/parketta lesz?**",
+        windows: "**Kell ablakcsere (nyílászárócsere)?**",
+        heatingsys: "**Szeretne fűtéskorszerűsítést?**\n• **Marad a mostani**\n• **Radiátorcsere**\n• **Padlófűtés**\n• **Hőszivattyús rendszer**",
+        klima: "**Kér klímát?**",
+    },
+    en: {
+        size: {
+            furdo: "**Roughly how many square metres is the bathroom?**\nPick an option or type the number.",
+            lakas: "**What is the floor area of the flat (m²)?**\nPick an option or type the number.",
+            haz: "**What is the floor area of the house (m²)?**\nPick an option or type the number.",
+            szoba: "**How many square metres is the room?**\nPick an option or type the number.",
+        },
+        tier: "**Which finish level would you like?**",
+        washing: "**Would you like a shower or a bath?**\n• **Cultured marble shower tray** - low rim, with a glass panel\n• **Shower cabin** - ready-made, complete\n• **Bathtub**\n• **Bath and shower**",
+        layout: "**Does the current layout stay, or should we move the water points?**\n(Water points: where the WC, basin, shower or bath connect.)",
+        heating: "**Would you like electric underfloor heating?**\n(A heating mat laid under the tiles - a pleasantly warm floor.)",
+        scope: "**How deep should the renovation go?**\n• **Full** - we replace everything (pipes, wiring, walls too)\n• **Partial** - new surfaces, tiling, painting + some trades\n• **Cosmetic** - mainly painting and new tiling",
+        roomscope: "**What would you like done with the room?**\n• **Painting only**\n• **Painting + new floor**\n• **Full renovation** - painting, floor, electrics, door",
+        bathrooms: "**How many bathrooms/WCs does the property have?**",
+        timeline: "**When would you like the work done?**",
+        refine_gate: "Your **preliminary price** is ready!\n**Would you like to refine it with a few quick questions?** You'll get a narrower, more accurate range.",
+        walls: "**Will we move or build walls, or relocate water points (WC, basin, kitchen)?**",
+        condition: "**What condition is the property in now?**\n• **Newly built** - under 15 years\n• **To be renovated** - over 20 years\n• **Old, worn** - 30+ years",
+        floortile: "**Will the floor be mostly tiles or laminate/parquet?**",
+        windows: "**Do the windows need replacing?**",
+        heatingsys: "**Would you like the heating upgraded?**\n• **Keep the current one**\n• **Replace radiators**\n• **Underfloor heating**\n• **Heat pump system**",
+        klima: "**Would you like air conditioning?**",
+    },
+    de: {
+        size: {
+            furdo: "**Wie viele Quadratmeter hat das Badezimmer ungefähr?**\nWählen Sie eine Option oder geben Sie die Zahl ein.",
+            lakas: "**Wie groß ist die Wohnfläche der Wohnung (m²)?**\nWählen Sie eine Option oder geben Sie die Zahl ein.",
+            haz: "**Wie groß ist die Wohnfläche des Hauses (m²)?**\nWählen Sie eine Option oder geben Sie die Zahl ein.",
+            szoba: "**Wie viele Quadratmeter hat der Raum?**\nWählen Sie eine Option oder geben Sie die Zahl ein.",
+        },
+        tier: "**Welche Ausstattungsstufe wünschen Sie?**",
+        washing: "**Möchten Sie eine Dusche oder eine Badewanne?**\n• **Mineralguss-Duschtasse** - flach, mit Glaswand\n• **Duschkabine** - fertig, komplett\n• **Badewanne**\n• **Wanne und Dusche**",
+        layout: "**Bleibt die aktuelle Anordnung, oder sollen die Wasseranschlüsse verlegt werden?**\n(Wasseranschlüsse: wo WC, Waschbecken, Dusche oder Wanne angeschlossen sind.)",
+        heating: "**Möchten Sie eine elektrische Fußbodenheizung?**\n(Eine Heizmatte unter den Fliesen - ein angenehm warmer Boden.)",
+        scope: "**Wie umfassend soll renoviert werden?**\n• **Komplett** - alles wird erneuert (Leitungen, Elektrik, auch Wände)\n• **Teilweise** - neue Oberflächen, Beläge, Malern + einige Gewerke\n• **Kosmetisch** - hauptsächlich Malern und neue Beläge",
+        roomscope: "**Was soll mit dem Raum gemacht werden?**\n• **Nur Malern**\n• **Malern + neuer Boden**\n• **Komplette Renovierung** - Malern, Boden, Elektrik, Tür",
+        bathrooms: "**Wie viele Bäder/WCs hat die Immobilie?**",
+        timeline: "**Wann soll die Arbeit ausgeführt werden?**",
+        refine_gate: "Ihr **vorläufiger Preis** steht!\n**Möchten Sie ihn mit ein paar kurzen Fragen verfeinern?** So erhalten Sie eine engere, genauere Spanne.",
+        walls: "**Werden Wände versetzt oder gebaut, oder Wasseranschlüsse (WC, Waschbecken, Küche) verlegt?**",
+        condition: "**In welchem Zustand ist die Immobilie jetzt?**\n• **Neubau** - unter 15 Jahre\n• **Renovierungsbedürftig** - über 20 Jahre\n• **Alt, abgenutzt** - 30+ Jahre",
+        floortile: "**Wird der Boden überwiegend gefliest oder Laminat/Parkett?**",
+        windows: "**Müssen die Fenster getauscht werden?**",
+        heatingsys: "**Möchten Sie die Heizung modernisieren?**\n• **Aktuelles bleibt**\n• **Heizkörpertausch**\n• **Fußbodenheizung**\n• **Wärmepumpensystem**",
+        klima: "**Möchten Sie eine Klimaanlage?**",
+    },
+};
+
+// The fixed question for `field`, or null when there is none (the model asks).
+function fixedQuestion(field, sel, lang) {
+    const L = normLang(lang);
+    const Q = QUESTION_TEXT[L] || QUESTION_TEXT.hu;
+    let q = Q[field];
+    if (q && typeof q === "object") q = q[sel && sel.projectType];
+    if (typeof q !== "string") return null;
+    // The size question is the first one after the project type, which is where
+    // the prompt tells the model to invite questions. Keep doing that.
+    if (field === "size") q += "\n" + ASK_ANYTIME[L];
+    return q;
+}
+
+// True when `answer` is, letter for letter, one of the buttons offered for
+// `field` in any of the three languages - i.e. a click, not typed text.
+function isChipAnswer(field, answer, sel) {
+    const a = String(answer || "").trim().toLowerCase();
+    if (!a) return false;
+    return ["hu", "en", "de"].some((L) => chipsFor(field, sel, L).some((c) => c.toLowerCase() === a));
+}
+
 // Parse the hidden running-state block out of any assistant message.
 function extractData(text) {
     if (typeof text !== "string") return null;
@@ -1284,6 +1343,12 @@ function stripManaged(s) {
 
 // Merge several state objects, keeping the last NON-EMPTY value per field. Makes
 // state immune to the model blanking a field in a single turn.
+// Project types the widget can still quote. "konyha" was retired on
+// 2026-09-23, so anything that still carries it (an old browser tab, a stale
+// client payload, the model) is dropped here rather than reaching buildQuote(),
+// which would otherwise fall through to the bathroom price.
+const PROJECT_TYPES = ["furdo", "lakas", "haz", "szoba"];
+
 function mergeState(...states) {
     const out = {};
     for (const s of states) {
@@ -1293,6 +1358,7 @@ function mergeState(...states) {
             if (v != null && String(v).trim() !== "") out[k] = v;
         }
     }
+    if (out.projectType != null && !PROJECT_TYPES.includes(String(out.projectType))) delete out.projectType;
     return out;
 }
 
@@ -1307,7 +1373,7 @@ function nextChips(sel, lang = "hu") {
 // tracks another, and the two drift apart: the text asks about the timeline
 // while the buttons still offer budget bands. The backend owns the order.
 const FIELD_TOPIC = {
-    projectType: "mit szeretne felújítani (fürdő / konyha / lakás / ház / szoba)",
+    projectType: "mit szeretne felújítani (fürdő / lakás / ház / szoba)",
     size: "a helyiség vagy ingatlan mérete négyzetméterben",
     tier: "a kivitelezési szint (alap / közepes / prémium)",
     washing: "zuhanyzót vagy kádat szeretne-e",
@@ -1481,7 +1547,7 @@ function lbl(group, key, lang = "hu") {
 //     CHOICE_VALUES, so the canonical token for index i is identical. ---
 const CHIP_LABELS_I18N = {
     en: {
-        projectType: ["Bathroom", "Kitchen", "Whole flat", "Family house", "A single room"],
+        projectType: ["Bathroom", "Whole flat", "Family house", "A single room"],
         tier: ["Basic / budget", "Mid-range", "Premium", "Not sure"],
         washing: ["Cultured marble shower tray (glass panel)", "Shower cabin", "Bathtub", "Bath and shower", "Not sure"],
         layout: ["Keep the current layout", "Relocate it", "Not sure"],
@@ -1503,7 +1569,7 @@ const CHIP_LABELS_I18N = {
         klima: ["Yes, I'd like AC", "Not needed", "Not sure"],
     },
     de: {
-        projectType: ["Badezimmer", "Küche", "Ganze Wohnung", "Einfamilienhaus", "Ein Zimmer"],
+        projectType: ["Badezimmer", "Ganze Wohnung", "Einfamilienhaus", "Ein Zimmer"],
         tier: ["Einfach / sparsam", "Mittel", "Premium", "Weiß nicht"],
         washing: ["Mineralguss-Duschtasse (Glaswand)", "Duschkabine", "Badewanne", "Wanne und Dusche", "Weiß nicht"],
         layout: ["Aktuelle Anordnung bleibt", "Wird verlegt", "Weiß nicht"],
@@ -1605,9 +1671,9 @@ function fixedBudgetChips(scale, lang = "hu", cur = "huf") {
         const toEur = (m) => Math.round(m * 1e6 / FT_PER_EUR_FALLBACK / 500) * 500;
         [a, b, c] = [toEur(a), toEur(b), toEur(c)];
         const t = (n) => n.toLocaleString("de-AT");
-        return [w.under(t(a), u), w.range(t(a), t(b), u), w.range(t(b), t(c), u), w.over(t(c), u), w.unsure, w.skip];
+        return [w.under(t(a), u), w.range(t(a), t(b), u), w.range(t(b), t(c), u), w.over(t(c), u), w.unsure];
     }
-    return [w.under(a, u), w.range(a, b, u), w.range(b, c, u), w.over(c, u), w.unsure, w.skip];
+    return [w.under(a, u), w.range(a, b, u), w.range(b, c, u), w.over(c, u), w.unsure];
 }
 
 // ===========================================================================
@@ -1927,7 +1993,6 @@ function summaryPairs(sel, lang = "hu") {
         const has = (k) => sel[k] != null && String(sel[k]).trim() !== "";
         p.push([K.scope, lbl("scope", sel.scope, L)]);
         p.push([K.baths, lbl("bathrooms", sel.bathrooms, L)]);
-        p.push([K.kitchen, lbl("kitchen", sel.kitchen, L)]);
         // Refine answers - only shown if the customer actually gave them.
         if (has("condition")) p.push([K.condition, lbl("condition", sel.condition, L)]);
         if (has("walls")) p.push([K.walls, lbl("walls", sel.walls, L)]);
@@ -1935,12 +2000,7 @@ function summaryPairs(sel, lang = "hu") {
         if (has("windows")) p.push([K.windows, lbl("windows", sel.windows, L)]);
         if (has("heatingsys")) p.push([K.heatsys, lbl("heatingsys", sel.heatingsys, L)]);
         if (has("klima")) p.push([K.klima, lbl("klima", sel.klima, L)]);
-    } else if (pt === "konyha") {
-        p.push([K.newkitchen, lbl("furniture", sel.furniture, L)]);
-        if (sel.furniture === "igen" && sel.kitchen_fm) p.push([K.units, lbl("kitchen_fm", sel.kitchen_fm, L)]);
-        p.push([K.appliances, lbl("appliances", sel.appliances, L)]);
-        p.push([K.layout, lbl("layout", sel.layout, L)]);
-    } else if (pt === "szoba") {
+        } else if (pt === "szoba") {
         p.push([K.scope, lbl("roomscope", sel.roomscope, L)]);
     }
     return p;
@@ -1983,17 +2043,21 @@ const OPTION_LABEL = {
 const QUOTE_STR = {
     hu: {
         approx: "kb.",
-        price: (name, size, tierLower, what, items, low, high, basisNote) => [
+        price: (name, size, tierLower, what, items, total, basisNote) => [
             `Köszönöm, ${name}! Íme az **előzetes árajánlata** egy **${size}**, **${tierLower}** ${what}ra.`,
             ``, `**Tételek (tájékoztató, kb. sávval):**`, items, ``,
-            `**Becsült végösszeg: kb. ${low} – ${high}**`, basisNote,
+            total, basisNote,
         ].join("\n"),
+        totalRange: (low, high) => `**Becsült végösszeg: kb. ${low} – ${high}**`,
+        totalFloor: (low) => `**Induló ár: ${low}-tól**`,
+        floorNote: "Ahol a **„Nem tudom”** választ adta, ott a szokásos megoldással számoltunk, ezért ez **induló ár** - a pontos összeget az ingyenes felmérés után rögzítjük.",
         // NM Bau alanyi adómentes: nincs rá ÁFA, tehát ez a fizetendő összeg.
         basisLabour: "(**ÁFA-mentes** ár - ez a **munkadíj**, az anyag nem tartalmazza)",
         basisTurnkey: "(**ÁFA-mentes** ár, **kulcsrakész**)",
         inclFurdo: "bontás, a szaniterek víz- és csatornabekötése, fűtés, vízszigetelés, kőműves munka, burkolás és a szaniterek beépítése - mindez **munkadíjban**",
         optionRepipe: (low, high) => `**Választható:** komplett víz- és csatornavezeték-csere **+ ${low} – ${high}**. Ha a mostani elrendezés marad, erre általában nincs szükség, ezért a fenti végösszeg nem tartalmazza.`,
         inclOther: "a fenti tételek - anyaggal és munkadíjjal, kulcsrakész kivitelben",
+        exclKitchen: "**Mit nem tartalmaz?** A **konyhabútort és a munkalapot** - a konyhára a helyszíni felmérés után adunk külön, egyedi ajánlatot.",
         exclLabour: "**Mit nem tartalmaz?** Az **anyagot**: csempe, járólap, szaniterek (WC, mosdó, kád), csaptelepek, zuhanytálca vagy üvegfal - ezeket Ön vásárolja meg, a kiválasztásban szívesen segítünk. A **festés-glettelést** és a **villanyszerelést** sem: ezeket alvállalkozó végzi, külön árajánlattal.",
         next: (incl, excl) => [
             `Ez egy **tájékoztató becslés** - a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott anyagok és a pontos műszaki tartalom függvényében.`,
@@ -2009,16 +2073,20 @@ const QUOTE_STR = {
     },
     en: {
         approx: "approx.",
-        price: (name, size, tierLower, what, items, low, high, basisNote) => [
+        price: (name, size, tierLower, what, items, total, basisNote) => [
             `Thank you, ${name}! Here is your **preliminary quote** - **${what}**, **${tierLower}** finish, **${size}**.`,
             ``, `**Line items (indicative, with an approx. range):**`, items, ``,
-            `**Estimated total: approx. ${low} – ${high}**`, basisNote,
+            total, basisNote,
         ].join("\n"),
+        totalRange: (low, high) => `**Estimated total: approx. ${low} – ${high}**`,
+        totalFloor: (low) => `**Starting price: from ${low}**`,
+        floorNote: "Where you answered **\"Not sure\"**, we priced the usual option, so this is a **starting price** - the exact amount is set after the free survey.",
         basisLabour: "(**VAT-free** price - this is the **labour**, materials not included)",
         basisTurnkey: "(**VAT-free** price, **turnkey**)",
         inclFurdo: "demolition, connecting the sanitaryware to the water and waste pipes, heating, waterproofing, masonry, tiling and fitting the sanitaryware - all as **labour**",
         optionRepipe: (low, high) => `**Optional:** a complete replacement of the water and waste pipes, **+ ${low} – ${high}**. If the layout stays as it is, this is usually not needed, so the total above does not include it.`,
         inclOther: "the items above - with materials and labour, in turnkey form",
+        exclKitchen: "**What is not included?** The **kitchen units and the worktop** - we quote the kitchen separately after the on-site survey.",
         exclLabour: "**What is not included?** The **materials**: tiles, sanitaryware (WC, basin, bath), taps and the shower tray or glass panel - you buy those yourself, and we're glad to help you choose. Nor **painting and skimming** or **electrical work**: a subcontractor carries those out and quotes them separately.",
         next: (incl, excl) => [
             `This is an **indicative estimate** - the final price is set after the **free on-site survey**, depending on the chosen materials and the exact technical scope.`,
@@ -2034,16 +2102,20 @@ const QUOTE_STR = {
     },
     de: {
         approx: "ca.",
-        price: (name, size, tierLower, what, items, low, high, basisNote) => [
+        price: (name, size, tierLower, what, items, total, basisNote) => [
             `Vielen Dank, ${name}! Hier ist Ihr **vorläufiges Angebot** - **${what}**, Ausstattung **${tierLower}**, **${size}**.`,
             ``, `**Positionen (Richtwerte, mit ca.-Spanne):**`, items, ``,
-            `**Geschätzte Gesamtsumme: ca. ${low} – ${high}**`, basisNote,
+            total, basisNote,
         ].join("\n"),
+        totalRange: (low, high) => `**Geschätzte Gesamtsumme: ca. ${low} – ${high}**`,
+        totalFloor: (low) => `**Einstiegspreis: ab ${low}**`,
+        floorNote: "Wo Sie **„Weiß nicht“** gewählt haben, haben wir die übliche Lösung berechnet, daher ist dies ein **Einstiegspreis** - der genaue Betrag wird nach der kostenlosen Besichtigung festgelegt.",
         basisLabour: "(Preis **ohne MwSt.** - dies ist der **Arbeitslohn**, ohne Material)",
         basisTurnkey: "(Preis **ohne MwSt.**, **schlüsselfertig**)",
         inclFurdo: "Abbruch, Anschluss der Sanitärobjekte an Wasser und Abwasser, Heizung, Abdichtung, Maurerarbeiten, Fliesenarbeiten und Montage der Sanitärobjekte - alles als **Arbeitsleistung**",
         optionRepipe: (low, high) => `**Optional:** kompletter Austausch der Wasser- und Abwasserleitungen, **+ ${low} – ${high}**. Wenn die bestehende Anordnung bleibt, ist das in der Regel nicht nötig, daher ist es in der Gesamtsumme oben nicht enthalten.`,
         inclOther: "die obigen Positionen - mit Material und Arbeit, schlüsselfertig",
+        exclKitchen: "**Was ist nicht enthalten?** Die **Küchenmöbel und die Arbeitsplatte** - die Küche bieten wir nach der Vor-Ort-Besichtigung gesondert an.",
         exclLabour: "**Was ist nicht enthalten?** Das **Material**: Fliesen, Sanitärobjekte (WC, Waschbecken, Badewanne), Armaturen sowie Duschtasse und Glaswand - diese kaufen Sie selbst, bei der Auswahl beraten wir Sie gerne. Ebenso wenig **Maler- und Spachtelarbeiten** sowie die **Elektroinstallation**: diese führt ein Subunternehmer aus und rechnet sie separat ab.",
         next: (incl, excl) => [
             `Dies ist eine **Richtschätzung** - der endgültige Preis wird nach der **kostenlosen Vor-Ort-Besichtigung** festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.`,
@@ -2058,6 +2130,15 @@ const QUOTE_STR = {
         emailQ: "Möchten Sie das Angebot auch per E-Mail erhalten?",
     },
 };
+// The price-relevant questions the customer answered "Nem tudom" to. Timeline
+// and budget never move the number, so they don't count.
+function priceUnknowns(sel) {
+    const pt = sel && sel.projectType;
+    if (!pt) return [];
+    return [...projectFields(pt, sel), ...refineFields(pt)].filter((f) => sel[f] === "nem_tudom");
+}
+const isStartingPrice = (sel) => priceUnknowns(sel).length > 0;
+
 function renderCustomerQuote(quote, sel, lang = "hu", opts = {}) {
     const L = normLang(lang);
     const S = QUOTE_STR[L] || QUOTE_STR.hu;
@@ -2070,11 +2151,17 @@ function renderCustomerQuote(quote, sel, lang = "hu", opts = {}) {
         .join("\n");
 
     const repipe = (quote.options || []).find((o) => o.key === "repipe");
+    // Any "Nem tudom" on a question the price depends on: we priced an assumed
+    // default, so a range would claim precision we don't have. Show where the
+    // price STARTS instead, and say why.
+    const total = isStartingPrice(sel)
+        ? [S.totalFloor(formatMoney(quote.low, cur)), S.floorNote].join("\n")
+        : S.totalRange(formatMoney(quote.low, cur), formatMoney(quote.high, cur));
     const priceBubble = [
         S.price(
             sel.name || "", sizeLabel(sel.size, pt, L), lbl("tier", sel.tier, L).toLowerCase(),
             L === "hu" ? what.toLowerCase() : what, items,
-            formatMoney(quote.low, cur), formatMoney(quote.high, cur),
+            total,
             labour ? S.basisLabour : S.basisTurnkey,
         ),
         // Named right under the total, so the customer sees both that the price
@@ -2085,7 +2172,10 @@ function renderCustomerQuote(quote, sel, lang = "hu", opts = {}) {
     // tiles and the sanitaryware themselves, and a number that hid that would be
     // the single most misleading thing this widget could say.
     const incl = labour ? S.inclFurdo : S.inclOther;
-    const nextBubble = S.next(incl, labour ? S.exclLabour : null);
+    // A flat or house quote is turnkey EXCEPT the kitchen, which NM Bau prices
+    // individually - saying so here is the same rule as the labour exclusions.
+    const excl = labour ? S.exclLabour : ((pt === "lakas" || pt === "haz") ? S.exclKitchen : null);
+    const nextBubble = S.next(incl, excl);
 
     const recap = [S.recapTitle];
     for (const [k, v] of summaryPairs(sel, L)) recap.push(`• ${k}: **${v}**`);
@@ -2106,7 +2196,7 @@ const PHONE = process.env.LEAD_PHONE || "+36 20 254 6624";
 //  System prompt (Hungarian) - conversation + structured output contract
 // ---------------------------------------------------------------------------
 const SYSTEM_PROMPT = `SZEMÉLYISÉG
-Te az "NM Bau" digitális árajánló asszisztense vagy. Lakás- és házfelújítással foglalkozó kivitelező nevében beszélsz: fürdőszoba, konyha, teljes lakás, családi ház és egyes szobák felújítása. FONTOS: kizárólag BELSŐ munkát vállalunk - külső munkát (homlokzat, tető, kerítés, térkövezés) NEM. MAGYARORSZÁGON ÉS AUSZTRIÁBAN egyaránt vállalunk munkát, ezért bármilyen magyar vagy osztrák helyszín (irányítószám, város, régió) rendben van - soha ne utasíts vissza egy helyszínt és ne állítsd, hogy csak Magyarországon dolgozunk. Kizárólag MAGYARUL válaszolj.
+Te az "NM Bau" digitális árajánló asszisztense vagy. Lakás- és házfelújítással foglalkozó kivitelező nevében beszélsz: fürdőszoba, teljes lakás, családi ház és egyes szobák felújítása (konyhára a felmérés után külön ajánlatot adunk). FONTOS: kizárólag BELSŐ munkát vállalunk - külső munkát (homlokzat, tető, kerítés, térkövezés) NEM. MAGYARORSZÁGON ÉS AUSZTRIÁBAN egyaránt vállalunk munkát, ezért bármilyen magyar vagy osztrák helyszín (irányítószám, város, régió) rendben van - soha ne utasíts vissza egy helyszínt és ne állítsd, hogy csak Magyarországon dolgozunk. Kizárólag MAGYARUL válaszolj.
 
 HANGNEM
 - Udvarias, közvetlen, szakértő és tömör. Lehetőleg 40 szó alatt válaszolj.
@@ -2139,11 +2229,12 @@ FONTOS - "NEM TUDOM": minden választós kérdésnél van "Nem tudom" lehetősé
 === 0. KÉRDÉS - MINDIG EZ AZ ELSŐ ===
 projectType - **félkövér** fő kérdés: "Mit szeretne felújítani?", ALATTA felsorolás:
 • **Fürdőszoba**
-• **Konyha**
 • **Teljes lakás**
 • **Családi ház** – belső felújítás
 • **Egy szoba / helyiség**
-Értékek: furdo | konyha | lakas | haz | szoba.
+Értékek: furdo | lakas | haz | szoba.
+
+KONYHA: konyhafelújításra a chatbot NEM ad árat. Ha az ügyfél konyhát említ, mondd el kedvesen, hogy a konyhára (bútor, munkalap) a helyszíni felmérés után adunk külön, egyedi ajánlatot, és kérdezd meg, hogy a lakás vagy a ház egyéb részét (fürdőszoba, szobák) szeretné-e felújíttatni - ha igen, azzal folytasd. Ha kizárólag konyha kell, kérd el a nevét és a telefonszámát, hogy kollégánk felhívja. Sose ígérj konyhaárat és ne találgass.
 
 A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL. A "size" kérdésnél mindig fogadj el konkrét számot (pl. "60") is, vagy a gombot.
 
@@ -2154,22 +2245,14 @@ A típus kiválasztása UTÁN a hozzá tartozó kérdéssort kövesd, EGYESÉVEL
 4. layout - "Marad a mostani elrendezés, vagy áthelyeznénk a vizes pontokat?": • **Marad** • **Áthelyezés** → marad|athelyez|nem_tudom
 5. heating - "Szeretne elektromos padlófűtést?" (csempe alá fektetett fűtőszőnyeg) → igen|nem|nem_tudom. Ezt MINDEN zuhany/kád változatnál fel kell tenni.
 
-=== KONYHA (konyha) ===
-1. size - "Körülbelül hány négyzetméteres a konyha?" (szám vagy gomb) → <szám>|nem_tudom
-2. tier - kivitelezési szint → basic|mid|premium|nem_tudom
-3. furniture - "Kell-e új konyhabútor és munkalap?" → igen|nem|nem_tudom
-3b. kitchen_fm - CSAK ha furniture=igen: "Milyen hosszú a konyhabútor (folyóméterben, a szekrénysor hossza)?" → fm_2_3|fm_3_4|fm_4_5|fm_5_6|fm_6p|nem_tudom
-4. appliances - "Beépített gépeket is kér (sütő, főzőlap, páraelszívó)?" → igen|nem|nem_tudom
-5. layout - "Marad a mostani elrendezés, vagy áthelyeznénk a víz/gáz/villany pontokat?" → marad|athelyez|nem_tudom
-
-=== TELJES LAKÁS (lakas) - CSAK ezt az 5 ALAPKÉRDÉST tedd fel (a többit a pontosító szakaszban) ===
+=== TELJES LAKÁS (lakas) - CSAK ezt a 4 ALAPKÉRDÉST tedd fel (a többit a pontosító szakaszban) ===
 1. size - "Mekkora a lakás alapterülete (m²)?" (szám vagy gomb) → <szám>|nem_tudom
 2. scope - "Milyen mély felújítás kell?": • **Teljes** – mindent cserélünk (csövek, villany, falak is) • **Részleges** – új felületek, burkolat, festés + néhány szakág, de nincs teljes bontás • **Kozmetikai** – főleg festés és új burkolat → teljes|reszleges|kozmetikai|nem_tudom
 3. tier - kivitelezési szint → basic|mid|premium|nem_tudom
 4. bathrooms - "Hány fürdőszoba/WC van?" → 1|2|3p|nem_tudom (3p = 3 vagy több)
-5. kitchen - "A konyhával mi legyen?": • **Új konyhabútorral** • **Felújítás bútor nélkül** • **Konyhát nem érinti** → uj|felujitas|nem|nem_tudom
+(A konyháról NE kérdezz: a konyha nem része az árnak, arra külön ajánlat megy a felmérés után.)
 
-=== CSALÁDI HÁZ (haz) - ugyanaz az 5 alapkérdés, mint a lakásnál (size, scope, tier, bathrooms, kitchen) ===
+=== CSALÁDI HÁZ (haz) - ugyanaz a 4 alapkérdés, mint a lakásnál (size, scope, tier, bathrooms) ===
 (Külső munkát - homlokzat, tető, kerítés, térkövezés - NEM vállalunk, ezt NE kérdezd és NE ajánld.)
 
 === EGY SZOBA (szoba) ===
@@ -2210,8 +2293,9 @@ budget - PONTOSAN EZZEL a felütéssel kérdezd, indoklással, magázódva, kül
 "**Ahhoz, hogy el tudjuk küldeni az árajánlatot, kérem, határozza meg a keret összegét.**"
 NE tedd hozzá, hogy kihagyható, és NE bagatellizáld el a kérdést - az indoklással megfogalmazott,
 határozott kérés sokkal több választ hoz, mint egy bocsánatkérő "ha nem szeretné, ugorjuk át".
-(A gombok között ettől függetlenül ott van egy kilépő lehetőség annak, aki tényleg nem akarja megadni,
-és a rendszer a kihagyást is elfogadja - de te ezt NE ajánlgasd.)
+(A keret megadása KÖTELEZŐ: nincs "inkább nem mondanám" lehetőség. Ha az ügyfél kitér előle, magyarázd el
+röviden, miért kell - enélkül nem tudunk reális ajánlatot adni -, és kérdezd meg újra. Aki tényleg nem tudja,
+választhatja a "Még nem tudom" lehetőséget.)
 RÖVIDEN kérdezz, NE sorold fel a sávokat szövegben - a felkínált összeg-sávokat a RENDSZER állítja
 össze az addigi válaszokból. Ezt a mezőt a rendszer kezeli és tölti ki: a DATA blokkban a "budget"
 MINDIG maradjon üres string (""). Fogadd el a választ (a kihagyást is) és LÉPJ TOVÁBB - SOHA ne tedd
@@ -2228,8 +2312,8 @@ SZABÁLYOK
 
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett vagy az adott típushoz nem tartozó mezők értéke üres string (""). SOSE találgass - csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
-<!--DATA:{"projectType":"","size":"","tier":"","washing":"","layout":"","heating":"","scope":"","roomscope":"","bathrooms":"","kitchen":"","windows":"","heatingsys":"","furniture":"","kitchen_fm":"","appliances":"","walls":"","condition":"","floortile":"","klima":"","refine_gate":"","budget":"","timeline":"","name":"","email":"","phone":"","postal_code":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|konyha|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; kitchen: uj|felujitas|nem|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; furniture: igen|nem|nem_tudom; kitchen_fm: fm_2_3|fm_3_4|fm_4_5|fm_5_6|fm_6p|nem_tudom; appliances: igen|nem|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: MINDIG üres string "" (a rendszer kezeli); timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
+<!--DATA:{"projectType":"","size":"","tier":"","washing":"","layout":"","heating":"","scope":"","roomscope":"","bathrooms":"","windows":"","heatingsys":"","walls":"","condition":"","floortile":"","klima":"","refine_gate":"","budget":"","timeline":"","name":"","email":"","phone":"","postal_code":""}-->
+A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: MINDIG üres string "" (a rendszer kezeli); timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") - és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 A választógombokat a rendszer automatikusan megjeleníti - neked nem kell gombokat kiírnod.`;
 
@@ -2260,7 +2344,7 @@ Ignore the earlier instruction "Kizárólag MAGYARUL válaszolj". You MUST write
 The instructions above contain example sentences in Hungarian (e.g. "Közben bármit kérdezhet is.", "Köszönöm, összeállítom az árajánlatot!"). These are TEMPLATES, not text to copy - render their meaning in ${lname}. NEVER output any Hungarian words in a user-visible message; if you notice Hungarian slipping in, rewrite it in ${lname}.
 The EARLIER turns of this conversation may be in a different language, because the customer started in one language and then switched. Do NOT mirror the language of the previous messages and do NOT comment on the switch - simply continue in ${lname} from now on.
 This applies to the WHOLE message, including the very first words. Do NOT open with a Hungarian acknowledgement such as "Rendben," / "Köszönöm," / "Értem," and then switch - the opening words must already be ${lname}. A reply that mixes the two languages is a failure.
-DO NOT translate or alter the hidden <!--DATA:...--> block: its keys AND its token values (e.g. furdo, konyha, lakas, haz, szoba, basic, mid, premium, zuhany, zuhanykabin, kad, mindketto, marad, athelyez, igen, nem, nem_tudom, teljes, reszleges, kozmetikai, festes, festes_padlo, csere, radiator, padlofutes, hoszivattyu, yes, no, t_asap, t_month, t_halfyear, t_thisyear, t_unsure) stay EXACTLY as defined.
+DO NOT translate or alter the hidden <!--DATA:...--> block: its keys AND its token values (e.g. furdo, lakas, haz, szoba, basic, mid, premium, zuhany, zuhanykabin, kad, mindketto, marad, athelyez, igen, nem, nem_tudom, teljes, reszleges, kozmetikai, festes, festes_padlo, csere, radiator, padlofutes, hoszivattyu, yes, no, t_asap, t_month, t_halfyear, t_thisyear, t_unsure) stay EXACTLY as defined.
 All money stays in Hungarian Forint (Ft). Never use emojis or em dashes; use a plain hyphen "-".`;
 }
 
@@ -2283,7 +2367,7 @@ const FORM_STR = {
         postal_code: "Helyszín", postalPh: "Irányítószám vagy település",
         email: "E-mail", emailPh: "pelda@gmail.com",
         phone: "Telefonszám", phonePh: "+36 20 123 4567",
-        budget: "Tervezett keret (nem kötelező)", budgetSkip: "Inkább nem mondanám",
+        budget: "Tervezett keret",
         submit: "Kérem a kalkulációt",
         why: "Az adatait csak az ajánlat elküldéséhez és a felmérés egyeztetéséhez használjuk.",
         required: "Kérem, töltse ki.",
@@ -2297,7 +2381,7 @@ const FORM_STR = {
         postal_code: "Location", postalPh: "Postcode or town",
         email: "E-mail", emailPh: "example@gmail.com",
         phone: "Phone", phonePh: "+36 20 123 4567",
-        budget: "Planned budget (optional)", budgetSkip: "I'd rather not say",
+        budget: "Planned budget",
         submit: "Show me the calculation",
         why: "We only use your details to send the quote and arrange the survey.",
         required: "Please fill this in.",
@@ -2311,7 +2395,7 @@ const FORM_STR = {
         postal_code: "Ort", postalPh: "Postleitzahl oder Ort",
         email: "E-Mail", emailPh: "beispiel@gmail.com",
         phone: "Telefon", phonePh: "+43 660 1234567",
-        budget: "Geplantes Budget (optional)", budgetSkip: "Lieber nicht angeben",
+        budget: "Geplantes Budget",
         submit: "Kalkulation anzeigen",
         why: "Wir verwenden Ihre Daten nur für das Angebot und die Terminvereinbarung.",
         required: "Bitte ausfüllen.",
@@ -2336,8 +2420,9 @@ function contactForm(sel, lang) {
             { key: "email", label: F.email, placeholder: F.emailPh, type: "email", autocomplete: "email", value: val("email") },
             { key: "phone", label: F.phone, placeholder: F.phonePh, type: "tel", autocomplete: "tel", value: val("phone") },
         ],
-        // Budget is the last field of the flow and it is optional, so it rides
-        // along here - that way the quote can render the moment the form is sent.
+        // Budget is the last field of the flow, and it is required like the rest,
+        // so it rides along here - that way the quote can render the moment the
+        // form is sent instead of costing another question.
         budget: { key: "budget", label: F.budget, options: budgetBandsFor(sel, lang).chips, value: val("budget") },
     };
 }
@@ -2353,7 +2438,7 @@ function validateContactForm(contact, lang) {
     const values = {};
     const get = (k) => String(c[k] == null ? "" : c[k]).trim().slice(0, 200);
 
-    for (const k of ["name", "postal_code", "email", "phone"]) {
+    for (const k of CONTACT_FIELDS) {
         const v = get(k);
         if (!v) { errors[k] = F.required; continue; }
         values[k] = v;
@@ -2367,12 +2452,11 @@ function validateContactForm(contact, lang) {
     }
     if (values.phone && phoneIssue(values.phone)) errors.phone = M.reaskPhone;
 
-    // Budget is labelled optional on the form, so leaving it blank has to MEAN
-    // something - otherwise the field stays pending and the bot turns round and
-    // asks for it in a bubble, which is exactly the interrogation the form was
-    // meant to end. An empty select records the existing "rather not say" opt-out.
+    // Required since 2026-09-23: the customer has to name a band. Blank comes
+    // back as a field error on the select, exactly like an empty name would.
     const b = get("budget");
-    values.budget = b || BUDGET_WORDS[normLang(lang)].skip;
+    if (!b) errors.budget = F.required;
+    else values.budget = b;
 
     return Object.keys(errors).length ? { errors } : { values };
 }
@@ -2781,6 +2865,25 @@ export default async function handler(request, response) {
             });
         }
 
+        // --- FAST PATH: a clicked button (or an accepted contact form) is an
+        // exact answer, so the next question is known without the model. Reply
+        // with its fixed text straight away - same response shape as a model
+        // turn, so the widget and its analytics can't tell the difference.
+        const exact = submitted || (askedField && determined[askedField] && isChipAnswer(askedField, question, baseSel));
+        const fixed = exact && nextField ? fixedQuestion(nextField, preSel, lang) : null;
+        if (fixed) {
+            const progFields = progressFields(preSel);
+            return response.status(200).json({
+                answer: fixed,
+                chips: nextChips(preSel, lang),
+                lang,
+                state: preSel,
+                estimate: runningEstimate(preSel, lang),
+                progress: progFields.filter((f) => preSel[f] != null && String(preSel[f]).trim() !== "").length,
+                progressTotal: progFields.length,
+            });
+        }
+
         // Normalized message list for the model (system prompt in the customer's
         // language, plus the one question it is allowed to ask this turn).
         // Language rule LAST: it has to outrank the Hungarian flow text and the
@@ -2947,7 +3050,6 @@ async function sendLeadWebhook(sel, quote, lang, meta = {}) {
                 heating: sel.heating || null,
                 scope: sel.scope || null,
                 bathrooms: sel.bathrooms || null,
-                kitchen: sel.kitchen || null,
                 timeline: sel.timeline || null,
                 budget: webhookLine(sel.budget) || null,
             },
@@ -3073,6 +3175,8 @@ function buildQuoteLink(sel, quote, lang, host, transcriptId = null) {
     // Optional extra, appended so links without one keep their exact old shape.
     const repipe = (quote.options || []).find((o) => o.key === "repipe");
     if (repipe) summary.push(Math.round(repipe.low), Math.round(repipe.high));
+    // Starting-price flag, last, so every older link keeps its exact shape.
+    if (isStartingPrice(sel)) summary.push("f");
     const d = Buffer.from(JSON.stringify(summary), "utf8").toString("base64url");
     const c = typeof transcriptId === "string" && TRANSCRIPT_ID_RE.test(transcriptId) ? `&c=${transcriptId}` : "";
     return `${base}/ajanlat?d=${d}${c}`;
@@ -3255,7 +3359,7 @@ async function finishQuote(sel, history, lang, response, meta = {}) {
         emailOffer: EMAIL_OFFER_ENABLED,
         lead: { sel, quote },
         state: sel,
-        estimate: { low: quote.low, high: quote.high, partial: false },
+        estimate: { low: quote.low, high: quote.high, partial: false, floor: isStartingPrice(sel), currency: quote.currency },
         progress: progFields.length,
         progressTotal: progFields.length,
     });
@@ -3266,9 +3370,9 @@ async function finishQuote(sel, history, lang, response, meta = {}) {
 // ---------------------------------------------------------------------------
 // Customer-email headings/words, per language. The owner copy is always Hungarian.
 const EMAIL_STR = {
-    hu: { approx: "kb.", yourQuote: (flow) => `Az Ön árajánlata - NM Bau ${flow}`, intro: (name) => `Kedves ${name || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:`, summaryH: "A felújítás összefoglalása", quoteH: "Kalkulált árajánlat (kulcsrakész, ÁFA-mentes)", quoteHLabour: "Kalkulált árajánlat (munkadíj, ÁFA-mentes)", totalRow: "Becsült végösszeg (kb. sáv)", footnote: "Előzetes, tájékoztató jellegű kalkuláció, kulcsrakész. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.", footnoteLabour: "Előzetes, tájékoztató jellegű kalkuláció. Az összeg a MUNKADÍJ, az anyagot (csempe, szaniter, csaptelep, zuhanykabin) nem tartalmazza - azt Ön vásárolja meg. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után véglegesül.", optionTag: "(választható, nem része a végösszegnek)", subject: (low, high) => `Az Ön árajánlata - NM Bau - ${low} – ${high}` },
-    en: { approx: "approx.", yourQuote: (flow) => `Your quote - NM Bau ${flow}`, intro: (name) => `Dear ${name || "Customer"}, thank you for your enquiry. Here is your preliminary quote:`, summaryH: "Renovation summary", quoteH: "Calculated quote (turnkey, VAT-free)", quoteHLabour: "Calculated quote (labour, VAT-free)", totalRow: "Estimated total (approx. range)", footnote: "Preliminary, indicative calculation, turnkey. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey, depending on the chosen materials and the precise technical scope.", footnoteLabour: "Preliminary, indicative calculation. The amount is the LABOUR charge and does not include materials (tiles, sanitaryware, taps, shower enclosure) - you buy those yourself. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey.", optionTag: "(optional, not part of the total)", subject: (low, high) => `Your quote - NM Bau - ${low} – ${high}` },
-    de: { approx: "ca.", yourQuote: (flow) => `Ihr Angebot - NM Bau ${flow}`, intro: (name) => `Sehr geehrte/r ${name || "Kunde/Kundin"}, vielen Dank für Ihre Anfrage. Hier ist Ihr vorläufiges Angebot:`, summaryH: "Zusammenfassung der Renovierung", quoteH: "Berechnetes Angebot (schlüsselfertig, ohne MwSt.)", quoteHLabour: "Berechnetes Angebot (Arbeitslohn, ohne MwSt.)", totalRow: "Geschätzte Gesamtsumme (ca.-Spanne)", footnote: "Vorläufige, unverbindliche Kalkulation, schlüsselfertig. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.", footnoteLabour: "Vorläufige, unverbindliche Kalkulation. Der Betrag ist der ARBEITSLOHN und enthält kein Material (Fliesen, Sanitärobjekte, Armaturen, Duschabtrennung) - dieses kaufen Sie selbst. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt.", optionTag: "(optional, nicht in der Gesamtsumme)", subject: (low, high) => `Ihr Angebot - NM Bau - ${low} – ${high}` },
+    hu: { approx: "kb.", yourQuote: (flow) => `Az Ön árajánlata - NM Bau ${flow}`, intro: (name) => `Kedves ${name || "Ügyfelünk"}! Köszönjük érdeklődését. Íme az előzetes árajánlata:`, summaryH: "A felújítás összefoglalása", quoteH: "Kalkulált árajánlat (kulcsrakész, ÁFA-mentes)", quoteHLabour: "Kalkulált árajánlat (munkadíj, ÁFA-mentes)", totalRow: "Becsült végösszeg (kb. sáv)", footnote: "Előzetes, tájékoztató jellegű kalkuláció, kulcsrakész. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után, a választott anyagok és a pontos műszaki tartalom függvényében véglegesül.", footnoteLabour: "Előzetes, tájékoztató jellegű kalkuláció. Az összeg a MUNKADÍJ, az anyagot (csempe, szaniter, csaptelep, zuhanykabin) nem tartalmazza - azt Ön vásárolja meg. Az ár ÁFA-mentes (alanyi adómentesség), tehát ez a maximálisan fizetendő összeg. A pontos ár a helyszíni felmérés után véglegesül.", optionTag: "(választható, nem része a végösszegnek)", subject: (low, high) => `Az Ön árajánlata - NM Bau - ${low} – ${high}`, totalRowFloor: "Induló ár", floorAmount: (low) => `${low}-tól`, subjectFloor: (low) => `Az Ön árajánlata - NM Bau - ${low}-tól` },
+    en: { approx: "approx.", yourQuote: (flow) => `Your quote - NM Bau ${flow}`, intro: (name) => `Dear ${name || "Customer"}, thank you for your enquiry. Here is your preliminary quote:`, summaryH: "Renovation summary", quoteH: "Calculated quote (turnkey, VAT-free)", quoteHLabour: "Calculated quote (labour, VAT-free)", totalRow: "Estimated total (approx. range)", footnote: "Preliminary, indicative calculation, turnkey. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey, depending on the chosen materials and the precise technical scope.", footnoteLabour: "Preliminary, indicative calculation. The amount is the LABOUR charge and does not include materials (tiles, sanitaryware, taps, shower enclosure) - you buy those yourself. The price is VAT-free (small-business exemption), so this is the maximum amount payable. The exact price is finalised after the on-site survey.", optionTag: "(optional, not part of the total)", subject: (low, high) => `Your quote - NM Bau - ${low} – ${high}`, totalRowFloor: "Starting price", floorAmount: (low) => `from ${low}`, subjectFloor: (low) => `Your quote - NM Bau - from ${low}` },
+    de: { approx: "ca.", yourQuote: (flow) => `Ihr Angebot - NM Bau ${flow}`, intro: (name) => `Sehr geehrte/r ${name || "Kunde/Kundin"}, vielen Dank für Ihre Anfrage. Hier ist Ihr vorläufiges Angebot:`, summaryH: "Zusammenfassung der Renovierung", quoteH: "Berechnetes Angebot (schlüsselfertig, ohne MwSt.)", quoteHLabour: "Berechnetes Angebot (Arbeitslohn, ohne MwSt.)", totalRow: "Geschätzte Gesamtsumme (ca.-Spanne)", footnote: "Vorläufige, unverbindliche Kalkulation, schlüsselfertig. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.", footnoteLabour: "Vorläufige, unverbindliche Kalkulation. Der Betrag ist der ARBEITSLOHN und enthält kein Material (Fliesen, Sanitärobjekte, Armaturen, Duschabtrennung) - dieses kaufen Sie selbst. Der Preis ist ohne MwSt. (Kleinunternehmerregelung) und damit der maximal zu zahlende Betrag. Der genaue Preis wird nach der Vor-Ort-Besichtigung festgelegt.", optionTag: "(optional, nicht in der Gesamtsumme)", subject: (low, high) => `Ihr Angebot - NM Bau - ${low} – ${high}`, totalRowFloor: "Einstiegspreis", floorAmount: (low) => `ab ${low}`, subjectFloor: (low) => `Ihr Angebot - NM Bau - ab ${low}` },
 };
 async function sendQuoteEmail(sel, quote, opts = {}) {
     const resendKey = process.env.RESEND_API_KEY;
@@ -3313,6 +3417,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         const qc = quote.currency || "huf";
         for (const i of quote.items) lines.push(`${i.label}: kb. ${formatMoney(i.low, qc)} - ${formatMoney(i.high, qc)}`);
         lines.push(`Becsült végösszeg: kb. ${formatMoney(quote.low, qc)} - ${formatMoney(quote.high, qc)}`);
+        if (isStartingPrice(sel)) lines.push(`Az ügyfél INDULÓ ÁRAT látott (${formatMoney(quote.low, qc)}-tól), mert "Nem tudom"-ot válaszolt: ${priceUnknowns(sel).join(", ")}`);
         for (const o of quote.options || []) {
             lines.push(`Választható, NINCS a végösszegben - ${OPTION_LABEL.hu[o.key] || o.key}: kb. ${formatMoney(o.low, qc)} - ${formatMoney(o.high, qc)}`);
         }
@@ -3329,7 +3434,7 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         htmlLines.push(`<p><b>A munka (${esc2(flowHu)})</b><br>${summaryPairs(sel, "hu").map(([k, v]) => `${esc2(k)}: ${esc2(v)}`).join("<br>")}</p>`);
         const qc2 = quote.currency || "huf";
         const basisTxt = quote.basis === "labour" ? "munkadíj, anyag nélkül" : "kulcsrakész";
-        htmlLines.push(`<p><b>Kalkuláció (${basisTxt}, ÁFA-mentes)</b><br>${quote.items.map(i => `${esc2(i.label)}: kb. ${formatMoney(i.low, qc2)} - ${formatMoney(i.high, qc2)}`).join("<br>")}<br>Becsült végösszeg: kb. ${formatMoney(quote.low, qc2)} - ${formatMoney(quote.high, qc2)}${(quote.options || []).map(o => `<br>Választható, NINCS a végösszegben - ${esc2(OPTION_LABEL.hu[o.key] || o.key)}: kb. ${formatMoney(o.low, qc2)} - ${formatMoney(o.high, qc2)}`).join("")}<br>Fajlagos: ~${formatMoney(quote.perM2, qc2)}/m²</p>`);
+        htmlLines.push(`<p><b>Kalkuláció (${basisTxt}, ÁFA-mentes)</b><br>${quote.items.map(i => `${esc2(i.label)}: kb. ${formatMoney(i.low, qc2)} - ${formatMoney(i.high, qc2)}`).join("<br>")}<br>Becsült végösszeg: kb. ${formatMoney(quote.low, qc2)} - ${formatMoney(quote.high, qc2)}${isStartingPrice(sel) ? `<br>Az ügyfél INDULÓ ÁRAT látott (${formatMoney(quote.low, qc2)}-tól), mert "Nem tudom"-ot válaszolt: ${esc2(priceUnknowns(sel).join(", "))}` : ""}${(quote.options || []).map(o => `<br>Választható, NINCS a végösszegben - ${esc2(OPTION_LABEL.hu[o.key] || o.key)}: kb. ${formatMoney(o.low, qc2)} - ${formatMoney(o.high, qc2)}`).join("")}<br>Fajlagos: ~${formatMoney(quote.perM2, qc2)}/m²</p>`);
         const tHtml = transcriptHtml(opts.transcript);
         if (tHtml) htmlLines.push(`<p><b>Teljes beszélgetés</b></p>${tHtml}`);
         const ownerHtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5">${htmlLines.join("")}</div>`;
@@ -3382,14 +3487,16 @@ async function sendQuoteEmail(sel, quote, opts = {}) {
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
         <h3 style="margin:0 0 8px">${esc(quote.basis === "labour" && E.quoteHLabour ? E.quoteHLabour : E.quoteH)}</h3>
         <table style="width:100%;border-collapse:collapse;font-size:14px">${itemRows}
-          <tr><td style="padding:10px 12px;font-weight:bold">${esc(E.totalRow)}</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${E.approx} ${formatMoney(quote.low, quote.currency)} – ${formatMoney(quote.high, quote.currency)}</td></tr>
+          <tr><td style="padding:10px 12px;font-weight:bold">${esc(isStartingPrice(sel) ? E.totalRowFloor : E.totalRow)}</td><td style="padding:10px 12px;text-align:right;font-weight:bold;color:#6B4A00;white-space:nowrap">${isStartingPrice(sel) ? E.floorAmount(formatMoney(quote.low, quote.currency)) : `${E.approx} ${formatMoney(quote.low, quote.currency)} – ${formatMoney(quote.high, quote.currency)}`}</td></tr>
           ${optionRows}
         </table>
         <p style="margin:16px 0 0;font-size:12px;color:#6b7280">${esc(quote.basis === "labour" && E.footnoteLabour ? E.footnoteLabour : E.footnote)} ${PHONE}</p>
       </div>
     </div>`;
 
-    const subject = E.subject(formatMoney(quote.low, quote.currency), formatMoney(quote.high, quote.currency));
+    const subject = isStartingPrice(sel)
+        ? E.subjectFloor(formatMoney(quote.low, quote.currency))
+        : E.subject(formatMoney(quote.low, quote.currency), formatMoney(quote.high, quote.currency));
     const sent = await resendSend({ from: fromEmail, to: toEmail, subject, html });
     if (sent.ok) {
         console.log("Árajánlat e-mail elküldve (ügyfél):", sent.id);

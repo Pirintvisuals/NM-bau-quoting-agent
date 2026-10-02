@@ -64,6 +64,8 @@
       estLabel: "Becsült ár",
       estPartial: "pontosítással szűkül (ÁFA-mentes)",
       estFinal: "véglegesített sáv (ÁFA-mentes)",
+      estFloor: "induló ár (ÁFA-mentes)",
+      fromPrice: (s) => s + "-tól",
       approx: "kb.",
       million: "millió Ft",
       emailYes: "Kérem e-mailben is",
@@ -108,6 +110,8 @@
       estLabel: "Estimated price",
       estPartial: "narrows as you refine (VAT-free)",
       estFinal: "finalised range (VAT-free)",
+      estFloor: "starting price (VAT-free)",
+      fromPrice: (s) => "from " + s,
       approx: "approx.",
       million: "million Ft",
       emailYes: "Yes, e-mail it to me",
@@ -152,6 +156,8 @@
       estLabel: "Geschätzter Preis",
       estPartial: "wird durch Angaben enger (ohne MwSt.)",
       estFinal: "endgültige Spanne (ohne MwSt.)",
+      estFloor: "Einstiegspreis (ohne MwSt.)",
+      fromPrice: (s) => "ab " + s,
       approx: "ca.",
       million: "Mio. Ft",
       emailYes: "Ja, bitte per E-Mail",
@@ -259,6 +265,109 @@
   }
 
   let container = null;
+
+  // --- Survive a page reload ------------------------------------------------
+  // A refresh (or clicking to another page of the site) used to wipe a half-
+  // finished quote. Everything needed to put the chat back exactly as it was
+  // is kept in sessionStorage: per tab, gone when the tab closes, never shared.
+  // The analytics counters ride along, so a restored chat carries on counting
+  // instead of starting a second funnel.
+  const STORE_KEY = "nmbau_chat_v1";
+  let viewLog = [];      // [sender, text] of every bubble on screen, in order
+  let pendingUI = null;  // what sits under the last bubble: {chips} | {form, errors} | {email}
+  let restoring = false; // replaying a saved chat: no saving, no analytics
+  let savedSession = null;
+
+  function saveSession() {
+    if (restoring || !started) return;
+    try {
+      sessionStorage.setItem(STORE_KEY, JSON.stringify({
+        v: 1, site: SITE_LANG, lang: LANG, open: chatOpen,
+        history: conversationHistory, state: convState, view: viewLog, ui: pendingUI,
+        sessionId, transcriptSends, transcriptSentAt, quoteDone, lastLead,
+        lastProgress, lastProgressTotal, lastEstimate, filledFields, lastField, turns,
+      }));
+    } catch (e) {}
+  }
+
+  function loadSession() {
+    try {
+      const s = JSON.parse(sessionStorage.getItem(STORE_KEY) || "null");
+      // A site-language switch between the two page loads starts over, same as
+      // a live switch does (see resetConversation).
+      if (s && s.v === 1 && s.site === SITE_LANG && Array.isArray(s.history) && Array.isArray(s.view) && s.view.length) return s;
+    } catch (e) {}
+    return null;
+  }
+
+  function clearSession() {
+    try { sessionStorage.removeItem(STORE_KEY); } catch (e) {}
+  }
+
+  // Put the saved variables back. The window itself is rebuilt by openChat.
+  function adoptSession(s) {
+    LANG = normLang(s.lang || SITE_LANG);
+    conversationHistory = s.history;
+    convState = s.state && typeof s.state === "object" ? s.state : {};
+    viewLog = s.view;
+    pendingUI = s.ui || null;
+    sessionId = s.sessionId || sessionId;
+    transcriptSends = s.transcriptSends || 0;
+    transcriptSentAt = s.transcriptSentAt || 0;
+    quoteDone = !!s.quoteDone;
+    lastLead = s.lastLead || null;
+    lastProgress = s.lastProgress || 0;
+    lastProgressTotal = s.lastProgressTotal || 0;
+    lastEstimate = s.lastEstimate || null;
+    filledFields = Array.isArray(s.filledFields) ? s.filledFields : [];
+    lastField = s.lastField || null;
+    turns = s.turns || 0;
+    started = true;
+    savedSession = s;
+    if (convState.projectType && window.posthog) {
+      try { window.posthog.register({ project_type: convState.projectType }); } catch (e) {}
+    }
+  }
+
+  // Redraw the saved bubbles into a freshly built window, then whatever was
+  // waiting under them. If the reload cut a request off mid-flight, the
+  // customer's last message never got its reply: send it again.
+  function replaySession() {
+    // The window is still animating open and the avatars are still loading, so
+    // a scroll made now lands short. Scroll again once the layout has settled.
+    setTimeout(() => messagesContainer && scrollToBottom(), 350);
+    restoring = true;
+    try {
+      viewLog.forEach((m) => addMessage(m[0], m[1]));
+      if (lastProgressTotal) updateProgress(lastProgress, lastProgressTotal);
+      if (lastEstimate) updateEstimate(lastEstimate);
+    } finally {
+      restoring = false;
+    }
+
+    const last = conversationHistory[conversationHistory.length - 1];
+    if (last && last.role === "user" && last.via !== "form" && !quoteDone) {
+      conversationHistory.pop();
+      const shown = !!last.via; // the hidden kickoff has no bubble
+      if (shown) {
+        const bubbles = messagesContainer.querySelectorAll(".faq-msg.user");
+        const b = bubbles[bubbles.length - 1];
+        if (b) b.remove();
+        if (viewLog.length && viewLog[viewLog.length - 1][0] === "user") viewLog.pop();
+      }
+      sendMessage(last.content, !shown, { replay: true, via: last.via });
+      return;
+    }
+
+    restoring = true;
+    try {
+      if (pendingUI && pendingUI.email && lastLead) renderEmailOffer();
+      else if (pendingUI && pendingUI.form) renderContactForm(pendingUI.form, pendingUI.errors || undefined);
+      else if (pendingUI && pendingUI.chips) renderChips(pendingUI.chips);
+    } finally {
+      restoring = false;
+    }
+  }
 
   // --- Owner transcript copy ------------------------------------------------
   // The backend only e-mails the owner when a quote is FINISHED. Most visitors
@@ -461,7 +570,9 @@
     setTimeout(() => tip.classList.add("hidden"), 300);
   }
 
-  function toggleChat() {
+  // silent: reopening a chat that was open before a page reload - not a new
+  // open by the visitor, so it isn't tracked as one.
+  function toggleChat(silent) {
     const launcher = document.querySelector(".faq-chat-launcher");
 
     if (chatOpen) {
@@ -496,8 +607,9 @@
       }
       chatOpen = true;
       if (launcher) launcher.classList.add("active");
-      track("chat_opened");
+      if (silent !== true) track("chat_opened");
     }
+    saveSession();
   }
 
   function openChat() {
@@ -631,6 +743,9 @@
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
       }
       sendMessage(t().kickoff, true);
+    } else if (savedSession) {
+      savedSession = null;
+      replaySession();
     }
   }
 
@@ -673,7 +788,9 @@
   function renderContactForm(form, errors) {
     clearChips();
     clearContactForm();
-    if (!errors) track("contact_form_shown", funnelSnapshot());
+    if (!errors && !restoring) track("contact_form_shown", funnelSnapshot());
+    pendingUI = { form: form, errors: errors || null };
+    saveSession();
 
     const wrap = document.createElement("form");
     wrap.className = "faq-form";
@@ -714,7 +831,8 @@
       wrap.appendChild(row);
     });
 
-    // Optional budget: a select, so it can be left alone without typing.
+    // Budget: a select, so it takes one tap. Required like every other field,
+    // so it also gets an error slot the server can mark.
     let budgetSel = null;
     if (form.budget && form.budget.options && form.budget.options.length) {
       const row = document.createElement("label");
@@ -737,6 +855,12 @@
         budgetSel.appendChild(opt);
       });
       row.appendChild(budgetSel);
+
+      const bErr = document.createElement("span");
+      bErr.className = "faq-form-err";
+      row.appendChild(bErr);
+
+      inputs[form.budget.key || "budget"] = { input: budgetSel, err: bErr, row: row };
       wrap.appendChild(row);
     }
 
@@ -769,8 +893,7 @@
       e.preventDefault();
       if (sending) return;
       const values = {};
-      Object.keys(inputs).forEach((k) => { values[k] = inputs[k].input.value.trim(); });
-      if (budgetSel && budgetSel.value) values.budget = budgetSel.value;
+      Object.keys(inputs).forEach((k) => { values[k] = String(inputs[k].input.value || "").trim(); });
       submitContactForm(values, form);
     };
 
@@ -848,6 +971,7 @@
         track("quote_completed", {
           project_type: st.projectType, size: st.size, tier: st.tier,
           quote_low: q.low, quote_high: q.high, fields_answered: filledFields.length, turns,
+          starting_price: !!(data.estimate && data.estimate.floor),
         });
       }
 
@@ -865,6 +989,7 @@
       addMessage("bot", t().errConnect);
     } finally {
       sending = false;
+      saveSession();
     }
   }
 
@@ -882,6 +1007,8 @@
 
   function renderChips(chips) {
     clearChips();
+    pendingUI = chips && chips.length ? { chips: chips } : null;
+    saveSession();
     if (!chips || !chips.length) return;
     const wrap = document.createElement("div");
     wrap.className = "faq-chips";
@@ -897,6 +1024,8 @@
   // After the quote is shown, offer to e-mail it to the customer.
   function renderEmailOffer() {
     clearChips();
+    pendingUI = { email: true };
+    saveSession();
     const wrap = document.createElement("div");
     wrap.className = "faq-chips";
 
@@ -904,11 +1033,12 @@
     yes.type = "button";
     yes.className = "faq-chip faq-chip-primary";
     yes.innerHTML = `${ICON.mail}<span>${t().emailYes}</span>`;
-    yes.onclick = () => { clearChips(); track("email_requested"); requestEmail(); };
+    yes.onclick = () => { clearChips(); pendingUI = null; saveSession(); track("email_requested"); requestEmail(); };
 
     const no = makeChip(t().emailNo);
     no.onclick = () => {
       clearChips();
+      pendingUI = null;
       track("email_declined");
       addMessage("bot", t().declineMsg);
     };
@@ -965,6 +1095,7 @@
     msg.appendChild(bubble);
     messagesContainer.appendChild(msg);
     scrollToBottom();
+    if (!restoring) { viewLog.push([sender, text]); saveSession(); }
     return msg;
   }
 
@@ -1005,6 +1136,25 @@
     return `${fmtHuf(low)} – ${fmtHuf(high)}`;
   }
 
+  // One amount, in the same style as fmtRange.
+  function fmtAmount(n, cur) {
+    if (cur === "eur") return `${Math.round(n).toLocaleString("de-AT")} EUR`;
+    if (n >= 1000000) {
+      return `${(Math.round(n / 100000) / 10).toLocaleString("hu-HU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${t().million}`;
+    }
+    return fmtHuf(n);
+  }
+
+  // Banner value + note. floor = the customer answered "Nem tudom" somewhere,
+  // so the finished quote is a starting price, not a range.
+  function estimateText(est) {
+    if (est.floor) return t().fromPrice(fmtAmount(est.low, est.currency));
+    return t().approx + " " + fmtRange(est.low, est.high, est.currency);
+  }
+  function estimateNote(est) {
+    return est.floor ? t().estFloor : est.partial ? t().estPartial : t().estFinal;
+  }
+
   let lastEstimateText = null; // so we only pulse when the value actually changes
   let lastEstimate = null;     // kept so the bar can be redrawn in another language
 
@@ -1018,9 +1168,9 @@
     estimateBarEl.style.display = "flex";
     const val = estimateBarEl.querySelector(".faq-estimate-val");
     const note = estimateBarEl.querySelector(".faq-estimate-note");
-    const text = t().approx + " " + fmtRange(est.low, est.high, est.currency);
+    const text = estimateText(est);
     if (val) val.textContent = text;
-    if (note) note.textContent = est.partial ? t().estPartial : t().estFinal;
+    if (note) note.textContent = estimateNote(est);
     // Pulse the banner when the number changes (and it was already on screen) so
     // people SEE it move/tighten - the main reason they keep answering.
     if (wasVisible && text !== lastEstimateText) {
@@ -1045,7 +1195,10 @@
   }
 
   // text: message to send. hidden: don't show as a user bubble (the kickoff).
-  async function sendMessage(presetText, hidden) {
+  // opts.replay: re-sending a message a page reload cut off - it was already
+  // counted, so it isn't counted again; opts.via keeps how it was first given.
+  async function sendMessage(presetText, hidden, opts) {
+    opts = opts || {};
     if (sending) return;
     const text = (presetText !== undefined ? presetText : (inputElement.value || "")).trim();
     if (!text) return;
@@ -1059,9 +1212,10 @@
     // chip. The owner reads typed answers to see what the bot misunderstood.
     // The hidden kickoff is neither, so it carries no `via`.
     const entry = { role: "user", content: text };
-    if (!hidden) entry.via = presetText === undefined ? "typed" : "chip";
+    if (!hidden) entry.via = opts.via || (presetText === undefined ? "typed" : "chip");
     conversationHistory.push(entry);
-    if (!hidden) { turns++; track("message_sent", { via: entry.via, after_field: lastField }); }
+    saveSession(); // so a reload mid-request knows this message is unanswered
+    if (!hidden && !opts.replay) { turns++; track("message_sent", { via: entry.via, after_field: lastField }); }
     let prevState = {};
     try { prevState = Object.assign({}, convState); } catch (e) {}
     addThinking();
@@ -1130,6 +1284,7 @@
           quote_high: q.high,
           fields_answered: filledFields.length,
           turns,
+          starting_price: !!(data.estimate && data.estimate.floor),
         });
       }
       const botResponse = data.answer || "Elnézést, nem találtam választ.";
@@ -1155,6 +1310,7 @@
       addMessage("bot", t().errConnect);
     } finally {
       sending = false;
+      saveSession();
     }
   }
 
@@ -1185,6 +1341,10 @@
     flushTranscript("nyelvváltás");
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    clearSession();
+    viewLog = [];
+    pendingUI = null;
+    savedSession = null;
     sessionId = newSessionId();
     transcriptSends = 0;
     transcriptSentAt = 0;
@@ -1264,8 +1424,8 @@
     if (lastEstimate) {
       const val = chatWindow.querySelector(".faq-estimate-val");
       const note = chatWindow.querySelector(".faq-estimate-note");
-      if (val) { lastEstimateText = t().approx + " " + fmtRange(lastEstimate.low, lastEstimate.high, lastEstimate.currency); val.textContent = lastEstimateText; }
-      if (note) note.textContent = lastEstimate.partial ? t().estPartial : t().estFinal;
+      if (val) { lastEstimateText = estimateText(lastEstimate); val.textContent = lastEstimateText; }
+      if (note) note.textContent = estimateNote(lastEstimate);
     }
     const closeBtn = chatWindow.querySelector(".faq-header-close");
     if (closeBtn) closeBtn.setAttribute("aria-label", t().chatClose);
@@ -1303,6 +1463,14 @@
     createLauncher();
     watchSiteLang();
     watchPageExit();
+    // A chat from before a reload: restore it, and reopen it if it was open.
+    // If it was closed, the next click on the launcher rebuilds it from the save.
+    const saved = loadSession();
+    if (saved) {
+      adoptSession(saved);
+      updateLauncherStrings();
+      if (saved.open) toggleChat(true);
+    }
     // Manual test hook. Have a short conversation (clicking the options is
     // enough), then run NMBAU.sendTranscriptNow() in the browser console - the
     // owner copy goes out straight away instead of waiting for the idle timer.
