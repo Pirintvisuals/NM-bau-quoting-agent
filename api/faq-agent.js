@@ -890,7 +890,10 @@ const TAIL_FIELDS = ["timeline"];
 // Contact order is deliberate, lowest friction first: the name is safe to give,
 // the postal code feels like it benefits them ("do you cover my area?"), and the
 // phone number - the one people balk at - comes last, at maximum sunk cost.
-const CONTACT_FIELDS = ["name", "postal_code", "email", "phone"];
+// E-mail is NOT in here: it is optional since 2026-10-02. The owner works from
+// the phone number, and every extra required field loses people. The form still
+// offers it (see contactForm), it just never blocks the quote.
+const CONTACT_FIELDS = ["name", "postal_code", "phone"];
 // Budget is asked LAST - after the essentials, contact and any refine questions -
 // and it is OPTIONAL. Asking "what's your budget?" early reads as a filter and
 // scares people off before they've seen anything; by the end they've invested a
@@ -2185,7 +2188,8 @@ function renderCustomerQuote(quote, sel, lang = "hu", opts = {}) {
         recap.push(``);
     }
     recap.push(S.urgent(PHONE));
-    if (EMAIL_OFFER_ENABLED) { recap.push(``); recap.push(S.emailQ); }
+    // No address, nothing to offer - e-mail is optional in the form.
+    if (EMAIL_OFFER_ENABLED && sel.email) { recap.push(``); recap.push(S.emailQ); }
 
     return [priceBubble, nextBubble, recap.join("\n")].join("\n[[SPLIT]]\n");
 }
@@ -2270,7 +2274,7 @@ kalkulációt." Utána MINDEN egyes adatnál mondd meg RÖVIDEN, MIÉRT kéred -
 válaszolnak. A sorrend szándékos: a legkisebb ellenállású adat az első, a telefonszám a legutolsó.
 name - "Kérem a nevét - kinek címezzük az árajánlatot?"
 postal_code - "Hol van az ingatlan? Elég az irányítószám vagy a település neve. Ez alapján tudjuk, hogy be tudjuk-e vállalni a területet." FONTOS: Magyarországon ÉS Ausztriában is dolgozunk, ezért BÁRMILYEN helymegjelölést fogadj el (magyar vagy osztrák irányítószám, városnév, kerület, régió, pl. "1010 Wien", "Graz", "Sopron", "Burgenland"). SOHA ne mondd, hogy csak magyar irányítószámot fogadsz el, és ne kérd újra, ha a válasz értelmes helymegjelölés.
-email - "Mi az e-mail címe? Erre küldjük el írásban a tételes kalkulációt."
+email - NEM KÖTELEZŐ. Csak akkor kérd, ha az ügyfél maga ajánlja fel; ha nem adja meg, az is rendben van.
 phone - "Mi a telefonszáma? Csak a felmérés időpontjának egyeztetéséhez kérjük."
 
 === PONTOSÍTÓ SZAKASZ - CSAK TELJES LAKÁSNÁL (lakas) ÉS CSALÁDI HÁZNÁL (haz), az elérhetőségek UTÁN ===
@@ -2365,7 +2369,7 @@ const FORM_STR = {
         title: "Elérhetőségek",
         name: "Név", namePh: "Az Ön neve",
         postal_code: "Helyszín", postalPh: "Irányítószám vagy település",
-        email: "E-mail", emailPh: "pelda@gmail.com",
+        email: "E-mail (nem kötelező)", emailPh: "pelda@gmail.com",
         phone: "Telefonszám", phonePh: "+36 20 123 4567",
         budget: "Tervezett keret",
         submit: "Kérem a kalkulációt",
@@ -2379,7 +2383,7 @@ const FORM_STR = {
         title: "Your details",
         name: "Name", namePh: "Your name",
         postal_code: "Location", postalPh: "Postcode or town",
-        email: "E-mail", emailPh: "example@gmail.com",
+        email: "E-mail (optional)", emailPh: "example@gmail.com",
         phone: "Phone", phonePh: "+36 20 123 4567",
         budget: "Planned budget",
         submit: "Show me the calculation",
@@ -2393,7 +2397,7 @@ const FORM_STR = {
         title: "Ihre Kontaktdaten",
         name: "Name", namePh: "Ihr Name",
         postal_code: "Ort", postalPh: "Postleitzahl oder Ort",
-        email: "E-Mail", emailPh: "beispiel@gmail.com",
+        email: "E-Mail (optional)", emailPh: "beispiel@gmail.com",
         phone: "Telefon", phonePh: "+43 660 1234567",
         budget: "Geplantes Budget",
         submit: "Kalkulation anzeigen",
@@ -2417,8 +2421,9 @@ function contactForm(sel, lang) {
         fields: [
             { key: "name", label: F.name, placeholder: F.namePh, type: "text", autocomplete: "name", value: val("name") },
             { key: "postal_code", label: F.postal_code, placeholder: F.postalPh, type: "text", autocomplete: "address-level2", value: val("postal_code") },
-            { key: "email", label: F.email, placeholder: F.emailPh, type: "email", autocomplete: "email", value: val("email") },
             { key: "phone", label: F.phone, placeholder: F.phonePh, type: "tel", autocomplete: "tel", value: val("phone") },
+            // Optional, so it sits last, after everything that is required.
+            { key: "email", label: F.email, placeholder: F.emailPh, type: "email", autocomplete: "email", value: val("email"), optional: true },
         ],
         // Budget is the last field of the flow, and it is required like the rest,
         // so it rides along here - that way the quote can render the moment the
@@ -2443,6 +2448,9 @@ function validateContactForm(contact, lang) {
         if (!v) { errors[k] = F.required; continue; }
         values[k] = v;
     }
+    // Optional: blank is fine, but a typed address still has to be deliverable.
+    const em = get("email");
+    if (em) values.email = em;
     if (values.name && values.name.length < 2) errors.name = F.nameShort;
     if (values.postal_code && locationIssue(values.postal_code)) errors.postal_code = M.reaskPostal;
     if (values.email) {
@@ -3229,7 +3237,7 @@ function newTranscriptId() {
 // the chat. The widget only adds it to the history AFTER the server accepts it,
 // so the request that finishes the quote never carries it.
 function contactLineOf(values) {
-    return CONTACT_FIELDS.map((k) => values && values[k]).filter(Boolean).join(" · ");
+    return [...CONTACT_FIELDS, "email"].map((k) => values && values[k]).filter(Boolean).join(" · ");
 }
 
 // How a customer message was given, as the widget tags it: "typed" into the
@@ -3356,7 +3364,7 @@ async function finishQuote(sel, history, lang, response, meta = {}) {
         answer: customerAnswer,
         chips: [],
         lang,
-        emailOffer: EMAIL_OFFER_ENABLED,
+        emailOffer: EMAIL_OFFER_ENABLED && !!sel.email,
         lead: { sel, quote },
         state: sel,
         estimate: { low: quote.low, high: quote.high, partial: false, floor: isStartingPrice(sel), currency: quote.currency },
