@@ -851,7 +851,7 @@ function buildBathroom(sel, cur = "huf") {
 }
 
 // Exported for unit testing the pricing math (no effect in production).
-export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget, buildQuoteLink, transcriptMessages };
+export { detectMessageLang, conversationLang, renderCustomerQuote, locationIssue, regionMultiplier, buildQuote, buildBathroom, buildFullReno, buildRoom, areaOf, areaOfType, tiledSurface, budgetBandsFor, resolveBudget, buildQuoteLink, transcriptMessages, nameIssue };
 
 // ---------------------------------------------------------------------------
 //  FLOW CONFIG - every project type asks its OWN question set. The backend drives
@@ -1197,6 +1197,19 @@ function locationIssue(loc) {
     return null;
 }
 
+// Name sanity check. The name goes straight into the CRM, so anything that is
+// clearly not a name is refused: a question or exclamation ("Mennyibe kerülne?"
+// once landed in Bigin as a lead's name), digits, a URL, a whole sentence.
+// Returns "format" | null.
+function nameIssue(name) {
+    const s = String(name || "").trim();
+    if (s.length < 2 || s.length > 60) return "format";
+    if (/[?!]/.test(s) || /\d/.test(s)) return "format";
+    if (/https?:\/\/|www\.|[\p{L}-]+\.[a-z]{2,}(?!\p{L})/iu.test(s)) return "format";
+    if (s.split(/\s+/).length > 4) return "format";
+    return null;
+}
+
 // Given the field the customer is answering + their message + the current state,
 // return the canonical value. Choice fields match the clicked chip label
 // (case-insensitive). Size accepts a per-type band chip OR a typed number. Budget
@@ -1362,6 +1375,10 @@ function mergeState(...states) {
         }
     }
     if (out.projectType != null && !PROJECT_TYPES.includes(String(out.projectType))) delete out.projectType;
+    // Every source of state (widget, earlier DATA blocks, the model, a typed
+    // answer) passes through here, so a non-name can never survive into the
+    // quote or the webhook: the field just goes back to unanswered and is asked again.
+    if (out.name != null && nameIssue(out.name)) delete out.name;
     return out;
 }
 
@@ -2317,7 +2334,7 @@ SZABÁLYOK
 REJTETT ÁLLAPOT (KÖTELEZŐ MINDEN VÁLASZBAN)
 MINDEN egyes válaszod legvégére tedd ki az eddig ismert adatokat ebben a rejtett blokkban (az ügyfél NEM látja). A még meg nem kérdezett vagy az adott típushoz nem tartozó mezők értéke üres string (""). SOSE találgass - csak azt töltsd ki, amit az ügyfél ténylegesen megválaszolt:
 <!--DATA:{"projectType":"","size":"","tier":"","washing":"","layout":"","heating":"","scope":"","roomscope":"","bathrooms":"","windows":"","heatingsys":"","walls":"","condition":"","floortile":"","klima":"","refine_gate":"","budget":"","timeline":"","name":"","email":"","phone":"","postal_code":""}-->
-A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: MINDIG üres string "" (a rendszer kezeli); timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg.
+A blokkban MINDEN kulcs mindig szerepeljen. Engedélyezett értékek: projectType: furdo|lakas|haz|szoba; size: <szám>|s_3_4|s_5_6|s_7_8|s_9_10|s_11p|nem_tudom; tier: basic|mid|premium|nem_tudom; washing: zuhany|zuhanykabin|kad|mindketto|nem_tudom; layout: marad|athelyez|nem_tudom; heating: igen|nem|nem_tudom; scope: teljes|reszleges|kozmetikai|nem_tudom; roomscope: festes|festes_padlo|teljes|nem_tudom; bathrooms: 1|2|3p|nem_tudom; windows: csere|marad|nem_tudom; heatingsys: marad|radiator|padlofutes|hoszivattyu|nem_tudom; walls: igen|nem|nem_tudom; condition: ujszeru|lakott|regi|nem_tudom; floortile: tobb_csempe|fele_fele|tobb_laminalt|nem_tudom; klima: igen|nem|nem_tudom; refine_gate: yes|no; budget: MINDIG üres string "" (a rendszer kezeli); timeline: t_asap|t_month|t_halfyear|t_thisyear|t_unsure. A többi (name, email, phone, postal_code) szabad szöveg. A "name" KIZÁRÓLAG az ügyfél tényleges neve (pl. "Kovács Péter"), pontosan úgy, ahogy ő maga megadta - ha nem mondta meg a nevét, üres string (""). SOHA ne írd a "name" mezőbe az ügyfél üzenetét, kérdését vagy bármilyen más szöveget (pl. "Mennyibe kerülne?" NEM név).
 Amikor minden szükséges mező megvan, írj egy RÖVID lezáró mondatot (pl. "Köszönöm, összeállítom az árajánlatot!") - és továbbra is tedd ki a teljes, kitöltött DATA blokkot. Az árat NE te írd ki; a rendszer számolja és mutatja.
 A választógombokat a rendszer automatikusan megjeleníti - neked nem kell gombokat kiírnod.`;
 
@@ -2375,7 +2392,6 @@ const FORM_STR = {
         submit: "Kérem a kalkulációt",
         why: "Az adatait csak az ajánlat elküldéséhez és a felmérés egyeztetéséhez használjuk.",
         required: "Kérem, töltse ki.",
-        nameShort: "Kérem, adja meg a teljes nevét.",
         summary: "Elérhetőségek megadva",
     },
     en: {
@@ -2389,7 +2405,6 @@ const FORM_STR = {
         submit: "Show me the calculation",
         why: "We only use your details to send the quote and arrange the survey.",
         required: "Please fill this in.",
-        nameShort: "Please give your full name.",
         summary: "Details provided",
     },
     de: {
@@ -2403,7 +2418,6 @@ const FORM_STR = {
         submit: "Kalkulation anzeigen",
         why: "Wir verwenden Ihre Daten nur für das Angebot und die Terminvereinbarung.",
         required: "Bitte ausfüllen.",
-        nameShort: "Bitte geben Sie Ihren vollständigen Namen an.",
         summary: "Kontaktdaten angegeben",
     },
 };
@@ -2451,7 +2465,7 @@ function validateContactForm(contact, lang) {
     // Optional: blank is fine, but a typed address still has to be deliverable.
     const em = get("email");
     if (em) values.email = em;
-    if (values.name && values.name.length < 2) errors.name = F.nameShort;
+    if (values.name && nameIssue(values.name)) errors.name = M.reaskName;
     if (values.postal_code && locationIssue(values.postal_code)) errors.postal_code = M.reaskPostal;
     if (values.email) {
         const i = emailIssue(values.email);
@@ -2474,6 +2488,7 @@ const MSG = {
         reaskEmailTypo: "Hoppá, úgy tűnik **elírás** csúszott a címbe - a Gmail helyes végződése **gmail.com**. Kérem, írja be újra a teljes e-mail címét.",
         reaskEmail: "Ezt az **e-mail címet** nem sikerült értelmezni. Kérem, írja be a teljes címét (pl. **nev@gmail.com**).",
         reaskPhone: "Ezt a **telefonszámot** nem sikerült értelmezni. Kérem, adja meg a teljes számát (pl. **+36 20 123 4567** vagy **06 30 123 4567**).",
+        reaskName: "Hogyan szólíthatjuk? Kérem, adja meg a **nevét**.",
         reaskPostal: "Ezt a **helyszínt** nem sikerült értelmezni. Kérem, adja meg az **irányítószámot vagy a település nevét** (pl. **3525**, **Sopron**, **1010 Wien**).",
         rateChat: "Túl sok üzenet rövid idő alatt. Kérjük, várjon egy kicsit, és próbálja újra.",
         rateEmail: "Túl sok kérés. Kérjük, próbálja meg kicsit később.",
@@ -2488,6 +2503,7 @@ const MSG = {
         reaskEmailTypo: "Oops, looks like a **typo** slipped into the address - the correct Gmail ending is **gmail.com**. Please type your full e-mail address again.",
         reaskEmail: "I couldn't read that **e-mail address**. Please type the full address (e.g. **name@gmail.com**).",
         reaskPhone: "I couldn't read that **phone number**. Please give the full number (e.g. **+36 20 123 4567**).",
+        reaskName: "What should we call you? Please give us your **name**.",
         reaskPostal: "I couldn't read that **location**. Please give the **postcode or the town name** (e.g. **3525**, **Sopron**, **1010 Wien**).",
         rateChat: "Too many messages in a short time. Please wait a moment and try again.",
         rateEmail: "Too many requests. Please try again a little later.",
@@ -2502,6 +2518,7 @@ const MSG = {
         reaskEmailTypo: "Hoppla, da hat sich wohl ein **Tippfehler** in die Adresse geschlichen - die richtige Gmail-Endung ist **gmail.com**. Bitte geben Sie Ihre vollständige E-Mail-Adresse erneut ein.",
         reaskEmail: "Diese **E-Mail-Adresse** konnte ich nicht lesen. Bitte geben Sie die vollständige Adresse ein (z. B. **name@gmail.com**).",
         reaskPhone: "Diese **Telefonnummer** konnte ich nicht lesen. Bitte geben Sie die vollständige Nummer an (z. B. **+36 20 123 4567**).",
+        reaskName: "Wie dürfen wir Sie ansprechen? Bitte geben Sie Ihren **Namen** an.",
         reaskPostal: "Diesen **Ort** konnte ich nicht lesen. Bitte geben Sie die **Postleitzahl oder den Ortsnamen** an (z. B. **3525**, **Sopron**, **1010 Wien**).",
         rateChat: "Zu viele Nachrichten in kurzer Zeit. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
         rateEmail: "Zu viele Anfragen. Bitte versuchen Sie es etwas später erneut.",
@@ -2789,9 +2806,16 @@ export default async function handler(request, response) {
         // a rejected phone/e-mail bleeding into the NEXT field. ---
         {
             let reask = null;
-            if (!(request.body && request.body.contact) && typeof question === "string" && question.trim()) {
+            if (!(request.body && request.body.contact) && typeof question === "string") {
                 const M = msg(lang);
-                if (askedField === "email") {
+                // The contact form is on screen when the name is pending, so
+                // anything typed into the chat box here is usually a question,
+                // not a name. Ask for the name and put the form back.
+                if (askedField === "name") {
+                    if (nameIssue(question)) reask = M.reaskName;
+                } else if (!question.trim()) {
+                    // nothing typed: nothing to check
+                } else if (askedField === "email") {
                     const i = emailIssue(question);
                     if (i === "gmail") reask = M.reaskEmailTypo;
                     else if (i) reask = M.reaskEmail;
@@ -2806,6 +2830,7 @@ export default async function handler(request, response) {
                     answer: reask,
                     chips: [],
                     lang,
+                    ...(askedField === "name" ? { form: contactForm(baseSel, lang) } : {}),
                     state: baseSel,
                     estimate: runningEstimate(baseSel, lang),
                     progress: progressFields(baseSel).filter((f) => baseSel[f] != null && String(baseSel[f]).trim() !== "").length,
@@ -3033,7 +3058,9 @@ async function sendLeadWebhook(sel, quote, lang, meta = {}) {
             session_id: webhookLine(meta.sessionId) || null,
             language: normLang(lang),
 
-            name: webhookLine(sel.name) || null,
+            // mergeState already keeps a non-name out of `sel`; this is the last
+            // line of defence, so a question can never reach the CRM as a name.
+            name: (!nameIssue(sel.name) && webhookLine(sel.name)) || null,
             phone: webhookLine(sel.phone) || null,
             email: webhookLine(sel.email) || null,
 
