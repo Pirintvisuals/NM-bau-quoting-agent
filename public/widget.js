@@ -188,10 +188,22 @@
   // Identifies which client/site this embed belongs to. Set per client via
   // window.NMBAU_CONFIG.client = "clientname"; falls back to the host name.
   const CLIENT_ID = config.client || (location.hostname || "unknown");
-  const WIDGET_VERSION = "2026-06-22";
+  const WIDGET_VERSION = "2026-10-21";
   // Session replay is on by default (you asked for it). Set
   // window.NMBAU_CONFIG.sessionReplay = false to turn it off for a client.
   const SESSION_REPLAY = config.sessionReplay !== false;
+  // Optional consent wiring: when the host page sets
+  // window.NMBAU_CONFIG.consentKey (a localStorage key that holds "accepted" once
+  // the visitor agreed on the site's cookie bar), PostHog keeps nothing in the
+  // browser (memory only) and session replay runs only with consent. The page
+  // announces later choices with a "nmbau:consent" event ({ detail: { granted } }).
+  // Without consentKey the widget behaves exactly as before.
+  const CONSENT_KEY = config.consentKey || "";
+  function replayAllowed() {
+    if (!SESSION_REPLAY) return false;
+    if (!CONSENT_KEY) return true;
+    try { return localStorage.getItem(CONSENT_KEY) === "accepted"; } catch (e) { return false; }
+  }
 
   // Fire an analytics event. No-ops safely if PostHog isn't loaded / no key set.
   function track(event, props, options) {
@@ -211,23 +223,31 @@
     // Official PostHog loader snippet (async-loads array.js from the CDN).
     !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
     try {
-      window.posthog.init(POSTHOG_KEY, {
+      window.posthog.init(POSTHOG_KEY, Object.assign({
         api_host: POSTHOG_HOST,
         capture_pageview: false, // it's an embedded widget, not a page view
         autocapture: false,      // we send our own clean, named events instead
-        disable_session_recording: !SESSION_REPLAY,
+        disable_session_recording: !replayAllowed(),
         session_recording: {
           maskAllInputs: true, // never record what the customer types (PII)
           // also mask the customer's own chat bubbles (they contain name /
           // address / etc.); bot bubbles + the price are left visible.
           maskTextSelector: ".faq-msg.user .faq-bubble, .ph-no-capture",
         },
-      });
+      }, CONSENT_KEY ? { persistence: "memory" } : {}));
       window.posthog.register({
         client: CLIENT_ID,
         widget_version: WIDGET_VERSION,
         language: navigator.language || "",
       });
+      if (CONSENT_KEY && SESSION_REPLAY) {
+        document.addEventListener("nmbau:consent", function (e) {
+          try {
+            if (e.detail && e.detail.granted) window.posthog.startSessionRecording();
+            else window.posthog.stopSessionRecording();
+          } catch (err) {}
+        });
+      }
     } catch (e) {}
   }
 
