@@ -825,6 +825,13 @@
 
     const inputs = {};
     (form.fields || []).forEach((f) => {
+      // A line above a group of fields, e.g. "phone OR e-mail, at least one".
+      if (f.hint) {
+        const hint = document.createElement("div");
+        hint.className = "faq-form-hint";
+        hint.textContent = f.hint;
+        wrap.appendChild(hint);
+      }
       const row = document.createElement("label");
       row.className = "faq-form-row";
 

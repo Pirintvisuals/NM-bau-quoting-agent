@@ -699,6 +699,18 @@
 }
 .faq-form-submit:focus-visible { outline: 3px solid rgba(184, 134, 11, 0.4); outline-offset: 2px; }
 
+.faq-form-hint {
+  margin: 10px 0 4px;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #6B4A00;
+  background: #FBF3DF;
+  border-left: 3px solid #B8860B;
+  border-radius: 4px;
+}
+
 .faq-form-why {
   margin-top: 9px;
   font-size: 11px;

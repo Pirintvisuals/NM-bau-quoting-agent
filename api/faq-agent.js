@@ -890,10 +890,16 @@ const TAIL_FIELDS = ["timeline"];
 // Contact order is deliberate, lowest friction first: the name is safe to give,
 // the postal code feels like it benefits them ("do you cover my area?"), and the
 // phone number - the one people balk at - comes last, at maximum sunk cost.
-// E-mail is NOT in here: it is optional since 2026-10-02. The owner works from
-// the phone number, and every extra required field loses people. The form still
-// offers it (see contactForm), it just never blocks the quote.
-const CONTACT_FIELDS = ["name", "postal_code", "phone"];
+// Every field the contact form collects. Name and location are always required;
+// of phone and e-mail, AT LEAST ONE is (since 2026-10-26) - some people won't
+// give a number, and losing them one step before the price costs more than
+// reaching them by e-mail. reachField() picks which one the flow waits for.
+const CONTACT_FIELDS = ["name", "postal_code", "phone", "email"];
+const filledVal = (o, k) => !!o && o[k] != null && String(o[k]).trim() !== "";
+// The phone, unless the customer gave only an e-mail.
+function reachField(sel) {
+    return filledVal(sel, "phone") || !filledVal(sel, "email") ? "phone" : "email";
+}
 // Budget is asked LAST - after the essentials, contact and any refine questions -
 // and it is OPTIONAL. Asking "what's your budget?" early reads as a filter and
 // scares people off before they've seen anything; by the end they've invested a
@@ -908,7 +914,7 @@ const BUDGET_FIELD = "budget";
 function fieldOrder(sel) {
     const pt = sel && sel.projectType;
     if (!pt) return ["projectType"];
-    const base = ["projectType", ...projectFields(pt, sel), ...TAIL_FIELDS, ...CONTACT_FIELDS];
+    const base = ["projectType", ...projectFields(pt, sel), ...TAIL_FIELDS, "name", "postal_code", reachField(sel)];
     if (hasRefine(pt)) {
         base.push("refine_gate");
         if (sel.refine_gate === "yes") base.push(...refineFields(pt));
@@ -2079,10 +2085,10 @@ const QUOTE_STR = {
         inclOther: "a fenti tételek - anyaggal és munkadíjjal, kulcsrakész kivitelben",
         exclKitchen: "**Mit nem tartalmaz?** A **konyhabútort és a munkalapot** - a konyhára a helyszíni felmérés után adunk külön, egyedi ajánlatot.",
         exclLabour: "**Mit nem tartalmaz?** Az **anyagot**: csempe, járólap, szaniterek (WC, mosdó, kád), csaptelepek, zuhanytálca vagy üvegfal - ezeket Ön vásárolja meg, a kiválasztásban szívesen segítünk. A **festés-glettelést** és a **villanyszerelést** sem: ezeket alvállalkozó végzi, külön árajánlattal.",
-        next: (incl, excl) => [
+        next: (incl, excl, byEmail) => [
             `Ez egy **tájékoztató becslés** - a végleges árat az **ingyenes helyszíni felmérés** után rögzítjük, a választott anyagok és a pontos műszaki tartalom függvényében.`,
             ``, `**Mit tartalmaz?** ${incl}.`, ...(excl ? [``, excl] : []), ``, `**Mi a következő lépés?**`,
-            `• Kollégánk **hamarosan keresi** a megadott telefonszámon.`,
+            byEmail ? `• Kollégánk **hamarosan jelentkezik** a megadott e-mail címen.` : `• Kollégánk **hamarosan keresi** a megadott telefonszámon.`,
             `• Egyeztetünk egy időpontot az **ingyenes felmérésre**.`,
             `• Utána megkapja a **végleges, tételes ajánlatot**.`,
         ].join("\n"),
@@ -2108,10 +2114,10 @@ const QUOTE_STR = {
         inclOther: "the items above - with materials and labour, in turnkey form",
         exclKitchen: "**What is not included?** The **kitchen units and the worktop** - we quote the kitchen separately after the on-site survey.",
         exclLabour: "**What is not included?** The **materials**: tiles, sanitaryware (WC, basin, bath), taps and the shower tray or glass panel - you buy those yourself, and we're glad to help you choose. Nor **painting and skimming** or **electrical work**: a subcontractor carries those out and quotes them separately.",
-        next: (incl, excl) => [
+        next: (incl, excl, byEmail) => [
             `This is an **indicative estimate** - the final price is set after the **free on-site survey**, depending on the chosen materials and the exact technical scope.`,
             ``, `**What's included?** ${incl}.`, ...(excl ? [``, excl] : []), ``, `**What happens next?**`,
-            `• Our colleague will **contact you shortly** on the number you gave.`,
+            byEmail ? `• Our colleague will **contact you shortly** at the e-mail address you gave.` : `• Our colleague will **contact you shortly** on the number you gave.`,
             `• We'll arrange a time for the **free survey**.`,
             `• Then you'll receive the **final, itemised offer**.`,
         ].join("\n"),
@@ -2137,10 +2143,10 @@ const QUOTE_STR = {
         inclOther: "die obigen Positionen - mit Material und Arbeit, schlüsselfertig",
         exclKitchen: "**Was ist nicht enthalten?** Die **Küchenmöbel und die Arbeitsplatte** - die Küche bieten wir nach der Vor-Ort-Besichtigung gesondert an.",
         exclLabour: "**Was ist nicht enthalten?** Das **Material**: Fliesen, Sanitärobjekte (WC, Waschbecken, Badewanne), Armaturen sowie Duschtasse und Glaswand - diese kaufen Sie selbst, bei der Auswahl beraten wir Sie gerne. Ebenso wenig **Maler- und Spachtelarbeiten** sowie die **Elektroinstallation**: diese führt ein Subunternehmer aus und rechnet sie separat ab.",
-        next: (incl, excl) => [
+        next: (incl, excl, byEmail) => [
             `Dies ist eine **Richtschätzung** - der endgültige Preis wird nach der **kostenlosen Vor-Ort-Besichtigung** festgelegt, abhängig von den gewählten Materialien und dem genauen technischen Umfang.`,
             ``, `**Was ist enthalten?** ${incl}.`, ...(excl ? [``, excl] : []), ``, `**Wie geht es weiter?**`,
-            `• Unser Kollege **meldet sich in Kürze** unter der angegebenen Nummer.`,
+            byEmail ? `• Unser Kollege **meldet sich in Kürze** unter der angegebenen E-Mail-Adresse.` : `• Unser Kollege **meldet sich in Kürze** unter der angegebenen Nummer.`,
             `• Wir vereinbaren einen Termin für die **kostenlose Besichtigung**.`,
             `• Anschließend erhalten Sie das **endgültige, detaillierte Angebot**.`,
         ].join("\n"),
@@ -2195,7 +2201,7 @@ function renderCustomerQuote(quote, sel, lang = "hu", opts = {}) {
     // A flat or house quote is turnkey EXCEPT the kitchen, which NM Bau prices
     // individually - saying so here is the same rule as the labour exclusions.
     const excl = labour ? S.exclLabour : ((pt === "lakas" || pt === "haz") ? S.exclKitchen : null);
-    const nextBubble = S.next(incl, excl);
+    const nextBubble = S.next(incl, excl, !filledVal(sel, "phone"));
 
     const recap = [S.recapTitle];
     for (const [k, v] of summaryPairs(sel, L)) recap.push(`• ${k}: **${v}**`);
@@ -2386,7 +2392,9 @@ const FORM_STR = {
         title: "Elérhetőségek",
         name: "Név", namePh: "Az Ön neve",
         postal_code: "Helyszín", postalPh: "Irányítószám vagy település",
-        email: "E-mail (nem kötelező)", emailPh: "pelda@gmail.com",
+        email: "E-mail", emailPh: "pelda@gmail.com",
+        reachHint: "Telefonszám VAGY e-mail - legalább az egyiket kérjük megadni:",
+        reachRequired: "Kérjük, adja meg a telefonszámát vagy az e-mail címét.",
         phone: "Telefonszám", phonePh: "+36 20 123 4567",
         budget: "Tervezett keret",
         submit: "Kérem a kalkulációt",
@@ -2399,7 +2407,9 @@ const FORM_STR = {
         title: "Your details",
         name: "Name", namePh: "Your name",
         postal_code: "Location", postalPh: "Postcode or town",
-        email: "E-mail (optional)", emailPh: "example@gmail.com",
+        email: "E-mail", emailPh: "example@gmail.com",
+        reachHint: "Phone OR e-mail - please give at least one:",
+        reachRequired: "Please give your phone number or your e-mail address.",
         phone: "Phone", phonePh: "+36 20 123 4567",
         budget: "Planned budget",
         submit: "Show me the calculation",
@@ -2412,7 +2422,9 @@ const FORM_STR = {
         title: "Ihre Kontaktdaten",
         name: "Name", namePh: "Ihr Name",
         postal_code: "Ort", postalPh: "Postleitzahl oder Ort",
-        email: "E-Mail (optional)", emailPh: "beispiel@gmail.com",
+        email: "E-Mail", emailPh: "beispiel@gmail.com",
+        reachHint: "Telefon ODER E-Mail - bitte mindestens eines angeben:",
+        reachRequired: "Bitte geben Sie Ihre Telefonnummer oder Ihre E-Mail-Adresse an.",
         phone: "Telefon", phonePh: "+43 660 1234567",
         budget: "Geplantes Budget",
         submit: "Kalkulation anzeigen",
@@ -2435,9 +2447,9 @@ function contactForm(sel, lang) {
         fields: [
             { key: "name", label: F.name, placeholder: F.namePh, type: "text", autocomplete: "name", value: val("name") },
             { key: "postal_code", label: F.postal_code, placeholder: F.postalPh, type: "text", autocomplete: "address-level2", value: val("postal_code") },
-            { key: "phone", label: F.phone, placeholder: F.phonePh, type: "tel", autocomplete: "tel", value: val("phone") },
-            // Optional, so it sits last, after everything that is required.
-            { key: "email", label: F.email, placeholder: F.emailPh, type: "email", autocomplete: "email", value: val("email"), optional: true },
+            // Either-or pair: the hint above the phone tells them one is enough.
+            { key: "phone", label: F.phone, placeholder: F.phonePh, type: "tel", autocomplete: "tel", value: val("phone"), hint: F.reachHint },
+            { key: "email", label: F.email, placeholder: F.emailPh, type: "email", autocomplete: "email", value: val("email") },
         ],
         // Budget is the last field of the flow, and it is required like the rest,
         // so it rides along here - that way the quote can render the moment the
@@ -2457,14 +2469,17 @@ function validateContactForm(contact, lang) {
     const values = {};
     const get = (k) => String(c[k] == null ? "" : c[k]).trim().slice(0, 200);
 
-    for (const k of CONTACT_FIELDS) {
+    for (const k of ["name", "postal_code"]) {
         const v = get(k);
         if (!v) { errors[k] = F.required; continue; }
         values[k] = v;
     }
-    // Optional: blank is fine, but a typed address still has to be deliverable.
-    const em = get("email");
+    // Phone or e-mail, at least one. Neither: both get marked, so it's obvious
+    // that filling in either one is enough. Whatever IS typed is still checked.
+    const ph = get("phone"), em = get("email");
+    if (ph) values.phone = ph;
     if (em) values.email = em;
+    if (!ph && !em) errors.phone = errors.email = F.reachRequired;
     if (values.name && nameIssue(values.name)) errors.name = M.reaskName;
     if (values.postal_code && locationIssue(values.postal_code)) errors.postal_code = M.reaskPostal;
     if (values.email) {
@@ -3264,7 +3279,7 @@ function newTranscriptId() {
 // the chat. The widget only adds it to the history AFTER the server accepts it,
 // so the request that finishes the quote never carries it.
 function contactLineOf(values) {
-    return [...CONTACT_FIELDS, "email"].map((k) => values && values[k]).filter(Boolean).join(" · ");
+    return CONTACT_FIELDS.map((k) => values && values[k]).filter(Boolean).join(" · ");
 }
 
 // How a customer message was given, as the widget tags it: "typed" into the
